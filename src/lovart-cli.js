@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readMacOSKeychainVariable } from "./lovart-credentials.js";
+import {
+  installMacOSCredentialHelper,
+  MacOSCredentialError,
+  readMacOSCredentials,
+} from "./macos-credential-helper.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, "..");
@@ -63,18 +67,34 @@ export function resolveLovartEnv(
   {
     platform = process.platform,
     readUserVariable = readWindowsUserVariable,
-    readMacVariable = readMacOSKeychainVariable,
+    readMacCredentials = () => readMacOSCredentials({
+      helperPath: installMacOSCredentialHelper({ projectRoot }),
+    }),
   } = {},
 ) {
   const resolved = { ...env };
-  const reader =
-    platform === "win32" ? readUserVariable : platform === "darwin" ? readMacVariable : null;
-  if (!reader) return resolved;
+  if (platform === "darwin") {
+    const credentials = readMacCredentials();
+    const accessKey = credentials?.accessKey;
+    const secretKey = credentials?.secretKey;
+    if (
+      typeof accessKey !== "string" ||
+      typeof secretKey !== "string" ||
+      !accessKey.trim() ||
+      !secretKey.trim()
+    ) {
+      throw new MacOSCredentialError("invalid_payload");
+    }
+    resolved.LOVART_ACCESS_KEY = accessKey;
+    resolved.LOVART_SECRET_KEY = secretKey;
+    return resolved;
+  }
 
-  for (const name of ["LOVART_ACCESS_KEY", "LOVART_SECRET_KEY"]) {
-    if (platform === "darwin" && resolved[name]) continue;
-    const value = reader(name);
-    if (value) resolved[name] = value;
+  if (platform === "win32") {
+    for (const name of ["LOVART_ACCESS_KEY", "LOVART_SECRET_KEY"]) {
+      const value = readUserVariable(name);
+      if (value) resolved[name] = value;
+    }
   }
   return resolved;
 }
@@ -105,17 +125,26 @@ export async function runLovart(
     scriptPath = process.env.LOVART_SKILL_SCRIPT || defaultScriptPath,
     outputDir = process.env.LOVART_OUTPUT_DIR || defaultOutputDir,
     env = process.env,
+    platform = process.platform,
+    readMacCredentials,
+    spawnProcess = spawn,
   } = {},
 ) {
   await mkdir(outputDir, { recursive: true });
   const pythonCommand = python || resolvePython(env);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(pythonCommand, [scriptPath, ...args], {
-      env: resolveLovartChildEnv(env),
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    let childEnv = resolveLovartChildEnv(env, { platform, readMacCredentials });
+    let child;
+    try {
+      child = spawnProcess(pythonCommand, [scriptPath, ...args], {
+        env: childEnv,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } finally {
+      childEnv = undefined;
+    }
 
     let stdout = "";
     let stderr = "";

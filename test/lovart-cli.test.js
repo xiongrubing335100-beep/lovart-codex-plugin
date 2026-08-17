@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import {
   confirmArgs,
   generationArgs,
@@ -8,6 +12,7 @@ import {
   resolveLovartEnv,
   resolvePython,
   resultArgs,
+  runLovart,
 } from "../src/lovart-cli.js";
 
 const outputDir = path.resolve("downloads-test");
@@ -97,14 +102,29 @@ test("resolveLovartEnv uses the latest Windows user credentials", () => {
   assert.equal(resolved.PATH, "test-path");
 });
 
-test("resolveLovartEnv uses macOS Keychain credentials", () => {
-  const values = {
-    LOVART_ACCESS_KEY: "keychain-ak",
-    LOVART_SECRET_KEY: "keychain-sk",
-  };
+test("resolveLovartEnv reads the latest macOS helper credentials for each child", () => {
+  let pair = { accessKey: "ak-one", secretKey: "sk-one" };
+  const readMacCredentials = () => pair;
+
+  assert.equal(
+    resolveLovartEnv({}, { platform: "darwin", readMacCredentials }).LOVART_ACCESS_KEY,
+    "ak-one",
+  );
+
+  pair = { accessKey: "ak-two", secretKey: "sk-two" };
+  assert.equal(
+    resolveLovartEnv({}, { platform: "darwin", readMacCredentials }).LOVART_ACCESS_KEY,
+    "ak-two",
+  );
+});
+
+test("resolveLovartEnv ignores stale macOS process credentials", () => {
   const resolved = resolveLovartEnv(
-    { PATH: "test-path" },
-    { platform: "darwin", readMacVariable: (name) => values[name] || "" },
+    { LOVART_ACCESS_KEY: "stale-ak", LOVART_SECRET_KEY: "stale-sk", PATH: "test-path" },
+    {
+      platform: "darwin",
+      readMacCredentials: () => ({ accessKey: "keychain-ak", secretKey: "keychain-sk" }),
+    },
   );
 
   assert.equal(resolved.LOVART_ACCESS_KEY, "keychain-ak");
@@ -112,20 +132,66 @@ test("resolveLovartEnv uses macOS Keychain credentials", () => {
   assert.equal(resolved.PATH, "test-path");
 });
 
-test("resolveLovartEnv keeps current macOS session credentials over stale Keychain values", () => {
-  const resolved = resolveLovartEnv(
-    { LOVART_ACCESS_KEY: "session-ak", LOVART_SECRET_KEY: "session-sk" },
-    {
+test("resolveLovartEnv rejects an incomplete macOS helper pair", () => {
+  assert.throws(
+    () => resolveLovartEnv({}, {
       platform: "darwin",
-      readMacVariable: (name) => ({
-        LOVART_ACCESS_KEY: "stale-ak",
-        LOVART_SECRET_KEY: "stale-sk",
-      })[name],
-    },
+      readMacCredentials: () => ({ accessKey: "only-ak", secretKey: "" }),
+    }),
+    /invalid response/i,
   );
+});
 
-  assert.equal(resolved.LOVART_ACCESS_KEY, "session-ak");
-  assert.equal(resolved.LOVART_SECRET_KEY, "session-sk");
+test("runLovart uses a rotated macOS pair on the next operation and isolates the parent env", async () => {
+  const parentEnv = { PATH: "test-path", LOVART_ACCESS_KEY: "stale-ak", LOVART_SECRET_KEY: "stale-sk" };
+  const originalParentEnv = { ...parentEnv };
+  const childEnvironments = [];
+  let pair = { accessKey: "ak-one", secretKey: "sk-one" };
+  let reads = 0;
+  const outputDir = mkdtempSync(path.join(tmpdir(), "lovart-child-env-"));
+
+  const spawnProcess = (_command, _args, options) => {
+    childEnvironments.push(options.env);
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    queueMicrotask(() => {
+      child.stdout.end("{}\n");
+      child.stderr.end();
+      child.emit("close", 0);
+    });
+    return child;
+  };
+
+  try {
+    const operationOptions = {
+      python: "/fixture/python",
+      scriptPath: "/fixture/agent_skill.py",
+      outputDir,
+      env: parentEnv,
+      platform: "darwin",
+      readMacCredentials: () => {
+        reads += 1;
+        return pair;
+      },
+      spawnProcess,
+    };
+
+    await runLovart(["config", "--json"], operationOptions);
+    pair = { accessKey: "ak-two", secretKey: "sk-two" };
+    await runLovart(["projects", "--json"], operationOptions);
+
+    assert.equal(reads, 2);
+    assert.equal(childEnvironments[0].LOVART_ACCESS_KEY, "ak-one");
+    assert.equal(childEnvironments[0].LOVART_SECRET_KEY, "sk-one");
+    assert.equal(childEnvironments[1].LOVART_ACCESS_KEY, "ak-two");
+    assert.equal(childEnvironments[1].LOVART_SECRET_KEY, "sk-two");
+    assert.deepEqual(parentEnv, originalParentEnv);
+    assert.notEqual(childEnvironments[0], parentEnv);
+    assert.notEqual(childEnvironments[1], parentEnv);
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true });
+  }
 });
 
 test("resolveLovartEnv leaves non-Windows environments unchanged", () => {

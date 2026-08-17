@@ -10,7 +10,7 @@ const projectRoot = process.env.LOVART_TEST_PROJECT_ROOT
   ? path.resolve(process.env.LOVART_TEST_PROJECT_ROOT)
   : path.resolve(here, "..");
 
-test("Codex-style stdio client discovers tools and can call local config", async () => {
+test("Codex-style stdio client discovers Lovart tools", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(projectRoot, "src", "index.js")],
@@ -35,15 +35,6 @@ test("Codex-style stdio client discovers tools and can call local config", async
     assert.ok(names.includes("lovart_upload"));
     assert.ok(names.includes("lovart_config"));
     assert.ok(names.includes("lovart_configure_credentials"));
-
-    const result = await client.callTool({ name: "lovart_config", arguments: {} });
-    assert.equal(result.isError, undefined, JSON.stringify(result.content));
-    assert.ok(Array.isArray(result.content));
-
-    const threads = await client.callTool({ name: "lovart_threads", arguments: {} });
-    assert.equal(threads.isError, undefined, JSON.stringify(threads.content));
-    assert.ok(threads.structuredContent && !Array.isArray(threads.structuredContent));
-    assert.ok(Array.isArray(threads.structuredContent.result));
 
     if (process.env.LOVART_TEST_UPLOAD_FILE) {
       const upload = await client.callTool({

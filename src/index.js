@@ -108,7 +108,7 @@ server.registerTool(
   "lovart_configure_credentials",
   {
     description:
-      "Open password-style dialogs for adding or replacing Lovart AK/SK credentials. On macOS, keys remain only in the current plugin process and must be entered again after a plugin restart. Keys are never returned to chat.",
+      "Open the local macOS or Windows credential setup. On macOS, AK/SK are stored only in this Mac's non-synchronizing login Keychain and reused after restarts. Keys are never returned to chat.",
     inputSchema: {},
   },
   async () => response(configureCredentialsForPlatform({ projectRoot })),
