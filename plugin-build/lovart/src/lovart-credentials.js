@@ -1,83 +1,24 @@
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
+import {
+  configureMacOSCredentials,
+  installMacOSCredentialHelper,
+} from "./macos-credential-helper.js";
 
-export const macOSKeychainService = "com.lovart.codex";
-export const macOSKeychainAccounts = Object.freeze({
-  access: "LOVART_ACCESS_KEY",
-  secret: "LOVART_SECRET_KEY",
-});
-
-const macOSSessionPromptSource = String.raw`
-const app = Application.currentApplication();
-app.includeStandardAdditions = true;
-
-function readSecret(message) {
-  const response = app.displayDialog(message, {
-    defaultAnswer: "",
-    hiddenAnswer: true,
-    buttons: ["Cancel", "Continue"],
-    defaultButton: "Continue",
-    cancelButton: "Cancel",
-  });
-  return response.textReturned.trim();
-}
-
-const accessKey = readSecret("Enter your Lovart Access Key (AK).");
-const secretKey = readSecret("Enter your Lovart Secret Key (SK).");
-if (!accessKey || !secretKey) throw new Error("Both Lovart keys are required.");
-JSON.stringify({ accessKey, secretKey });
-`;
-
-export function readMacOSKeychainVariable(name, { run = execFileSync } = {}) {
-  try {
-    const output = run(
-      "security",
-      ["find-generic-password", "-s", macOSKeychainService, "-a", name, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
-    return String(output).trim();
-  } catch {
-    return "";
-  }
-}
-
-export function configureMacOSSessionCredentials({
-  env = process.env,
-  run = execFileSync,
-} = {}) {
-  try {
-    const output = run(
-      "osascript",
-      ["-l", "JavaScript", "-e", macOSSessionPromptSource],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
-    const credentials = JSON.parse(String(output).trim());
-    if (!credentials.accessKey || !credentials.secretKey) throw new Error("Missing credentials.");
-
-    env.LOVART_ACCESS_KEY = credentials.accessKey;
-    env.LOVART_SECRET_KEY = credentials.secretKey;
-    return {
-      configured: true,
-      message: "Lovart credentials loaded for this MCP session.",
-    };
-  } catch {
-    return {
-      configured: false,
-      message: "Lovart key setup cancelled.",
-    };
-  }
+function configureInstalledMacOSCredentials({ projectRoot }) {
+  const helperPath = installMacOSCredentialHelper({ projectRoot });
+  return configureMacOSCredentials({ helperPath });
 }
 
 export function configureCredentialsForPlatform({
   platform = process.platform,
   projectRoot,
-  env = process.env,
-  run = execFileSync,
+  configureMacCredentials = configureInstalledMacOSCredentials,
   spawnProcess = spawn,
   systemRoot = process.env.SystemRoot || "C:\\Windows",
 } = {}) {
   if (platform === "darwin") {
-    return configureMacOSSessionCredentials({ env, run });
+    return configureMacCredentials({ projectRoot });
   }
 
   return openCredentialSetup({ platform, projectRoot, spawnProcess, systemRoot });
@@ -93,10 +34,7 @@ export function openCredentialSetup({
   let args;
   let options = { detached: true, stdio: "ignore" };
 
-  if (platform === "darwin") {
-    command = "osascript";
-    args = [path.join(projectRoot, "scripts", "configure-lovart-credentials.applescript")];
-  } else if (platform === "win32") {
+  if (platform === "win32") {
     command = path.join(
       systemRoot,
       "System32",

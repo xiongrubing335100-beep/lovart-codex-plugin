@@ -58,6 +58,8 @@ When the user invokes `$lovart`, treat the text after it as their creation reque
 
 ## Credentials
 
-The MCP reads `LOVART_ACCESS_KEY` and `LOVART_SECRET_KEY` from the local Windows user environment. Never ask the user to paste either secret into chat or pass credentials as tool arguments.
+Never ask the user to paste `LOVART_ACCESS_KEY` or `LOVART_SECRET_KEY` into chat or pass either secret as a tool argument.
 
-When the user asks to add, replace, update, or configure Lovart keys, call `lovart_configure_credentials`. It opens a local password-style setup window. Ask the user to save both fields, then continue the task; restarting Codex is not required.
+On macOS, when the user asks to add, replace, update, or configure Lovart keys, always call `lovart_configure_credentials`. It opens a local password-style setup window that atomically stores both keys in this Mac's login Keychain. If a Lovart operation reports `not_configured`, tell the user that one local setup is required, then call `lovart_configure_credentials`; do not request secrets in chat. After setup, continue the task without restarting Codex.
+
+On Windows, `lovart_configure_credentials` opens the user-scoped setup window. Linux reads credentials from the process environment.
