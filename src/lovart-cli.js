@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readMacOSKeychainVariable } from "./lovart-credentials.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, "..");
@@ -59,14 +60,20 @@ export function readWindowsUserVariable(name) {
 
 export function resolveLovartEnv(
   env = process.env,
-  { platform = process.platform, readUserVariable = readWindowsUserVariable } = {},
+  {
+    platform = process.platform,
+    readUserVariable = readWindowsUserVariable,
+    readMacVariable = readMacOSKeychainVariable,
+  } = {},
 ) {
   const resolved = { ...env };
-  if (platform !== "win32") return resolved;
+  const reader =
+    platform === "win32" ? readUserVariable : platform === "darwin" ? readMacVariable : null;
+  if (!reader) return resolved;
 
   for (const name of ["LOVART_ACCESS_KEY", "LOVART_SECRET_KEY"]) {
-    const currentUserValue = readUserVariable(name);
-    if (currentUserValue) resolved[name] = currentUserValue;
+    const value = reader(name);
+    if (value) resolved[name] = value;
   }
   return resolved;
 }

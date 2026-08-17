@@ -13,7 +13,7 @@ $env:LOVART_SECRET_KEY = "sk_xxx"
 
 The MCP never accepts credentials as tool arguments and does not save them. Lovart's official Python client reads them from the process environment.
 
-On Windows, run `scripts/configure-lovart-credentials.ps1` for a password-style setup window. The MCP reads the latest saved user-level values before every Lovart call, so replacing a key does not require restarting Codex.
+On Windows, run `scripts/configure-lovart-credentials.ps1` for a password-style setup window. On macOS, the credential tool opens protected dialogs and stores both values in the current user's Keychain. The MCP reads the latest saved values only for the Lovart subprocess, so replacing a key does not require restarting Codex. Linux continues to use the process environment.
 
 ## Run
 
