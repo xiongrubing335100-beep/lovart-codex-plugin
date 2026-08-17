@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, copyFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { verifyMacOSCredentialHelper } from "../scripts/verify-macos-credential-helper.mjs";
@@ -84,6 +84,39 @@ test("macOS helper rejects a malformed raw hash manifest before execution", { sk
       /manifest must contain one lowercase SHA-256 digest followed by one newline/
     );
     assert.deepEqual(invocations, []);
+  } finally {
+    rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
+});
+
+test("macOS helper verifier binds every check to a private staged copy", { skip: process.platform !== "darwin" }, () => {
+  const binary = path.resolve("bin/macos/lovart-credential-helper");
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "lovart-helper-binding-"));
+  const mutableBinary = join(temporaryDirectory, "lovart-credential-helper");
+  const checkedPaths = [];
+
+  try {
+    copyFileSync(binary, mutableBinary);
+    copyFileSync(`${binary}.sha256`, `${mutableBinary}.sha256`);
+
+    const result = verifyMacOSCredentialHelper({
+      binary: mutableBinary,
+      execFile: (command, args, options) => {
+        if (command === "xcrun") {
+          appendFileSync(mutableBinary, "changed after staging");
+          checkedPaths.push(args.at(-1));
+        } else if (command === "codesign") {
+          checkedPaths.push(args.at(-1));
+        } else {
+          checkedPaths.push(command);
+        }
+        return execFileSync(command, args, options);
+      },
+    });
+
+    assert.equal(result.version, "1");
+    assert.deepEqual(result.bytes, readFileSync(binary));
+    assert.equal(checkedPaths.every((candidate) => candidate !== mutableBinary), true);
   } finally {
     rmSync(temporaryDirectory, { force: true, recursive: true });
   }

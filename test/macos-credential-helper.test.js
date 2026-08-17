@@ -4,12 +4,14 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -45,6 +47,7 @@ function createHelperFixture() {
     verifyHelper({ binary, manifest, expectedVersion }) {
       assert.equal(manifest, `${binary}.sha256`);
       assert.equal(expectedVersion, "1");
+      return { bytes: readFileSync(binary) };
     },
   };
 }
@@ -103,6 +106,118 @@ test("rejects a changed packaged helper before creating an install", () => {
       (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
     );
     assert.equal(existsSync(path.join(fixture.homeDir, helperRelativeInstallPath)), false);
+  });
+});
+
+test("rejects symlinked helper destinations and symlinked install directories", () => {
+  withFixture((fixture) => {
+    const installed = path.join(fixture.homeDir, helperRelativeInstallPath);
+    const victim = path.join(fixture.temporaryDirectory, "victim");
+    mkdirSync(path.dirname(installed), { recursive: true });
+    writeFileSync(victim, "do not follow");
+    symlinkSync(victim, installed);
+
+    assert.throws(
+      () => installMacOSCredentialHelper(fixture),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+    assert.equal(readFileSync(victim, "utf8"), "do not follow");
+
+    rmSync(fixture.homeDir, { force: true, recursive: true });
+    const redirectedLibrary = path.join(fixture.temporaryDirectory, "redirected-library");
+    mkdirSync(redirectedLibrary);
+    mkdirSync(fixture.homeDir);
+    symlinkSync(redirectedLibrary, path.join(fixture.homeDir, "Library"));
+
+    assert.throws(
+      () => installMacOSCredentialHelper(fixture),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+    assert.equal(existsSync(path.join(redirectedLibrary, "Application Support")), false);
+
+    rmSync(fixture.homeDir, { force: true, recursive: true });
+    const redirectedHome = path.join(fixture.temporaryDirectory, "redirected-home");
+    mkdirSync(redirectedHome);
+    symlinkSync(redirectedHome, fixture.homeDir);
+
+    assert.throws(
+      () => installMacOSCredentialHelper(fixture),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+    assert.equal(existsSync(path.join(redirectedHome, "Library")), false);
+  });
+});
+
+test("does not clobber a race winner and validates the published inode", () => {
+  withFixture((fixture) => {
+    const installed = path.join(fixture.homeDir, helperRelativeInstallPath);
+    let raceHookCalled = false;
+    const result = installMacOSCredentialHelper({
+      ...fixture,
+      beforePublish() {
+        raceHookCalled = true;
+        writeFileSync(installed, fixture.binaryBytes, { mode: 0o700 });
+      },
+    });
+
+    assert.equal(result, installed);
+    assert.equal(raceHookCalled, true);
+    assert.deepEqual(readFileSync(installed), fixture.binaryBytes);
+    assert.equal(lstatSync(installed).isFile(), true);
+    assert.equal(statSync(installed).nlink >= 1, true);
+  });
+});
+
+test("rejects a destination symlink swapped in during publication", () => {
+  withFixture((fixture) => {
+    const installed = path.join(fixture.homeDir, helperRelativeInstallPath);
+    const victim = path.join(fixture.temporaryDirectory, "publication-victim");
+    writeFileSync(victim, "untouched victim");
+
+    assert.throws(
+      () => installMacOSCredentialHelper({
+        ...fixture,
+        beforePublish() {
+          symlinkSync(victim, installed);
+        },
+      }),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+    assert.equal(readFileSync(victim, "utf8"), "untouched victim");
+    assert.equal(lstatSync(installed).isSymbolicLink(), true);
+  });
+});
+
+test("does not remove a colliding temporary entry it did not create", () => {
+  withFixture((fixture) => {
+    const installDirectory = path.join(fixture.homeDir, path.dirname(helperRelativeInstallPath));
+    mkdirSync(installDirectory, { recursive: true });
+    const collision = path.join(
+      installDirectory,
+      `.lovart-credential-helper.${process.pid}.test-collision.tmp`,
+    );
+    writeFileSync(collision, "someone else's temporary file");
+
+    assert.throws(
+      () => installMacOSCredentialHelper({ ...fixture, randomId: () => "test-collision" }),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+    assert.equal(readFileSync(collision, "utf8"), "someone else's temporary file");
+  });
+});
+
+test("publishes the verifier's staged bytes when the packaged path changes later", () => {
+  withFixture((fixture) => {
+    const expectedBytes = Buffer.from(fixture.binaryBytes);
+    const installed = installMacOSCredentialHelper({
+      ...fixture,
+      verifyHelper({ binary }) {
+        writeFileSync(binary, "changed after staged verification");
+        return { bytes: expectedBytes };
+      },
+    });
+
+    assert.deepEqual(readFileSync(installed), expectedBytes);
   });
 });
 
@@ -198,4 +313,16 @@ test("maps typed helper failures without exposing helper output", () => {
       error.osStatus === -25308 &&
       error.message === "Lovart could not read credentials from the login Keychain.",
   );
+});
+
+test("rejects unsafe OSStatus values", () => {
+  for (const osStatus of [2 ** 53, 2 ** 31, -(2 ** 31) - 1]) {
+    assert.throws(
+      () => readMacOSCredentials({
+        helperPath: "/fixture/helper",
+        run: () => JSON.stringify({ status: "error", errorCode: "keychain_read_failed", osStatus }),
+      }),
+      (error) => error instanceof MacOSCredentialError && error.code === "invalid_payload",
+    );
+  }
 });

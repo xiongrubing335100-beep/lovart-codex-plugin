@@ -1,15 +1,18 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  closeSync,
   constants as fsConstants,
-  chmodSync,
-  copyFileSync,
-  existsSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
-  renameSync,
-  statSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -20,6 +23,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const defaultProjectRoot = path.resolve(here, "..");
 const manifestPattern = /^[0-9a-f]{64}\n$/;
 const maximumHelperResponseBytes = 16 * 1024;
+const minimumInt32 = -(2 ** 31);
+const maximumInt32 = (2 ** 31) - 1;
 const helperErrorMessages = Object.freeze({
   not_configured: "Lovart credentials are not configured on this Mac. Run Lovart credential setup.",
   cancelled: "Lovart credential setup was cancelled.",
@@ -48,7 +53,7 @@ export class MacOSCredentialError extends Error {
     super(helperErrorMessages[code] || helperErrorMessages.invalid_payload);
     this.name = "MacOSCredentialError";
     this.code = knownHelperErrorCodes.has(code) ? code : "invalid_payload";
-    if (Number.isInteger(osStatus)) this.osStatus = osStatus;
+    if (isInt32(osStatus)) this.osStatus = osStatus;
   }
 }
 
@@ -66,22 +71,168 @@ function expectedHashFromManifest(manifest) {
   return content.slice(0, -1);
 }
 
-function sha256(file) {
-  return createHash("sha256").update(readFileSync(file)).digest("hex");
+function sameInode(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
-function hasExpectedHash(file, expectedHash) {
+function isInt32(value) {
+  return Number.isSafeInteger(value) && value >= minimumInt32 && value <= maximumInt32;
+}
+
+function requireNoFollow() {
+  if (!Number.isInteger(fsConstants.O_NOFOLLOW)) throw helperInvalid();
+}
+
+function readValidatedRegularFile(file, expectedHash, expectedIdentity) {
+  requireNoFollow();
+  const named = lstatSync(file);
+  if (!named.isFile() || named.isSymbolicLink()) throw helperInvalid();
+  if (expectedIdentity && !sameInode(named, expectedIdentity)) throw helperInvalid();
+
+  const descriptor = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
-    return sha256(file) === expectedHash;
-  } catch {
-    return false;
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || !sameInode(named, opened) || (expectedIdentity && !sameInode(opened, expectedIdentity))) {
+      throw helperInvalid();
+    }
+    const bytes = readFileSync(descriptor);
+    const afterRead = fstatSync(descriptor);
+    const current = lstatSync(file);
+    if (!sameInode(opened, afterRead) || !sameInode(opened, current)) throw helperInvalid();
+    if (createHash("sha256").update(bytes).digest("hex") !== expectedHash) throw helperInvalid();
+    return { bytes, identity: opened };
+  } finally {
+    closeSync(descriptor);
   }
 }
 
-function ensurePrivateDirectory(directory) {
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
-  if ((statSync(directory).mode & 0o777) !== 0o700) throw helperInvalid();
+function validateInstalledHelper(file, expectedHash, expectedIdentity) {
+  requireNoFollow();
+  const named = lstatSync(file);
+  if (!named.isFile() || named.isSymbolicLink()) throw helperInvalid();
+  if (expectedIdentity && !sameInode(named, expectedIdentity)) throw helperInvalid();
+
+  const descriptor = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || !sameInode(named, opened) || (expectedIdentity && !sameInode(opened, expectedIdentity))) {
+      throw helperInvalid();
+    }
+    const bytes = readFileSync(descriptor);
+    if (createHash("sha256").update(bytes).digest("hex") !== expectedHash) throw helperInvalid();
+    fchmodSync(descriptor, 0o700);
+    const secured = fstatSync(descriptor);
+    const current = lstatSync(file);
+    if (!sameInode(opened, secured) || !sameInode(opened, current) || (secured.mode & 0o777) !== 0o700) {
+      throw helperInvalid();
+    }
+    return opened;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function ensureSafeInstallDirectory(homeDir) {
+  requireNoFollow();
+  const components = ["Library", "Application Support", "Lovart Codex", "credential-helper", helperProtocolVersion];
+  try {
+    lstatSync(homeDir);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+  }
+  const home = lstatSync(homeDir);
+  if (!home.isDirectory() || home.isSymbolicLink()) throw helperInvalid();
+  const homeDescriptor = openSync(
+    homeDir,
+    fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+  );
+  try {
+    if (!sameInode(home, fstatSync(homeDescriptor))) throw helperInvalid();
+  } finally {
+    closeSync(homeDescriptor);
+  }
+  let current = homeDir;
+
+  for (const [index, component] of components.entries()) {
+    const next = path.join(current, component);
+    try {
+      lstatSync(next);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      mkdirSync(next, { mode: 0o700 });
+    }
+    const named = lstatSync(next);
+    if (!named.isDirectory() || named.isSymbolicLink()) throw helperInvalid();
+    const descriptor = openSync(next, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW);
+    try {
+      const opened = fstatSync(descriptor);
+      if (!opened.isDirectory() || !sameInode(named, opened)) throw helperInvalid();
+      if (index >= 2) {
+        fchmodSync(descriptor, 0o700);
+        if ((fstatSync(descriptor).mode & 0o777) !== 0o700) throw helperInvalid();
+      }
+    } finally {
+      closeSync(descriptor);
+    }
+    current = next;
+  }
+  return current;
+}
+
+function destinationExists(file) {
+  try {
+    lstatSync(file);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function removeOwnedTemporary(file, identity) {
+  try {
+    if (sameInode(lstatSync(file), identity)) unlinkSync(file);
+  } catch {
+    // Do not remove an entry that was swapped after this function created it.
+  }
+}
+
+function createPrivateTemporary(directory, basename, bytes, randomId) {
+  requireNoFollow();
+  const file = path.join(directory, `.${basename}.${process.pid}.${randomId()}.tmp`);
+  let descriptor;
+  try {
+    descriptor = openSync(
+      file,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+      0o700,
+    );
+  } catch {
+    throw helperInvalid();
+  }
+
+  try {
+    writeFileSync(descriptor, bytes);
+    fchmodSync(descriptor, 0o700);
+    fsyncSync(descriptor);
+    const identity = fstatSync(descriptor);
+    if (!identity.isFile() || (identity.mode & 0o777) !== 0o700) throw helperInvalid();
+    return { file, identity };
+  } catch (error) {
+    const identity = fstatSync(descriptor);
+    closeSync(descriptor);
+    removeOwnedTemporary(file, identity);
+    throw error;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // The error path already closed the descriptor before cleanup.
+      }
+    }
+  }
 }
 
 /**
@@ -93,66 +244,55 @@ export function installMacOSCredentialHelper({
   projectRoot = defaultProjectRoot,
   homeDir = homedir(),
   verifyHelper = verifyMacOSCredentialHelper,
+  randomId = randomUUID,
+  beforePublish,
 } = {}) {
   const bundledHelper = path.join(projectRoot, "bin", "macos", "lovart-credential-helper");
   const manifest = `${bundledHelper}.sha256`;
-  let temporaryFile;
+  let temporary;
 
   try {
     const expectedHash = expectedHashFromManifest(manifest);
-    if (!hasExpectedHash(bundledHelper, expectedHash)) throw helperInvalid();
-
-    // This verifies the packaged universal binary's signature, architectures,
-    // and protocol version without ever executing the checkout copy directly.
-    verifyHelper({
+    const verification = verifyHelper({
       binary: bundledHelper,
       manifest,
       expectedVersion: helperProtocolVersion,
     });
+    if (!Buffer.isBuffer(verification?.bytes)) throw helperInvalid();
+    if (createHash("sha256").update(verification.bytes).digest("hex") !== expectedHash) throw helperInvalid();
 
     const installedHelper = path.join(homeDir, helperRelativeInstallPath);
-    const installDirectory = path.dirname(installedHelper);
-    ensurePrivateDirectory(installDirectory);
+    const installDirectory = ensureSafeInstallDirectory(homeDir);
 
-    if (existsSync(installedHelper)) {
-      if (!hasExpectedHash(installedHelper, expectedHash)) throw helperInvalid();
-      chmodSync(installedHelper, 0o700);
-      if ((statSync(installedHelper).mode & 0o777) !== 0o700) throw helperInvalid();
+    if (destinationExists(installedHelper)) {
+      validateInstalledHelper(installedHelper, expectedHash);
       return installedHelper;
     }
 
-    temporaryFile = path.join(
+    temporary = createPrivateTemporary(
       installDirectory,
-      `.${path.basename(installedHelper)}.${process.pid}.${randomUUID()}.tmp`,
+      path.basename(installedHelper),
+      verification.bytes,
+      randomId,
     );
-    copyFileSync(bundledHelper, temporaryFile, fsConstants.COPYFILE_EXCL);
-    chmodSync(temporaryFile, 0o700);
-    if ((statSync(temporaryFile).mode & 0o777) !== 0o700 || !hasExpectedHash(temporaryFile, expectedHash)) {
-      throw helperInvalid();
-    }
+    readValidatedRegularFile(temporary.file, expectedHash, temporary.identity);
 
-    // Do not replace a helper another process installed while this copy was in
-    // progress. It must independently match the same pinned bytes.
-    if (existsSync(installedHelper)) {
-      if (!hasExpectedHash(installedHelper, expectedHash)) throw helperInvalid();
-      chmodSync(installedHelper, 0o700);
+    beforePublish?.({ temporaryFile: temporary.file, installedHelper });
+
+    try {
+      linkSync(temporary.file, installedHelper);
+      validateInstalledHelper(installedHelper, expectedHash, temporary.identity);
+      return installedHelper;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      validateInstalledHelper(installedHelper, expectedHash);
       return installedHelper;
     }
-
-    renameSync(temporaryFile, installedHelper);
-    temporaryFile = undefined;
-    return installedHelper;
   } catch (error) {
     if (error instanceof MacOSCredentialError) throw error;
     throw helperInvalid();
   } finally {
-    if (temporaryFile) {
-      try {
-        unlinkSync(temporaryFile);
-      } catch {
-        // The unique file was either never created or has already been removed.
-      }
-    }
+    if (temporary) removeOwnedTemporary(temporary.file, temporary.identity);
   }
 }
 
@@ -215,7 +355,7 @@ function throwTypedHelperFailure(response) {
     typeof response.errorCode !== "string" ||
     !knownHelperErrorCodes.has(response.errorCode) ||
     (Object.hasOwn(response, "configured") && typeof response.configured !== "boolean") ||
-    (Object.hasOwn(response, "osStatus") && !Number.isInteger(response.osStatus))
+    (Object.hasOwn(response, "osStatus") && !isInt32(response.osStatus))
   ) {
     throw invalidPayload();
   }
