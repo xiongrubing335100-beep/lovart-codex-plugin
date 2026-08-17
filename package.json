@@ -1,0 +1,15 @@
+{
+  "name": "lovart-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP adapter for the official Lovart Agent Skill",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test --test-isolation=none"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "zod": "^3.25.76"
+  }
+}

@@ -1,0 +1,11 @@
+node_modules/
+downloads/
+.lovart-test-state/
+lovart-output/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log

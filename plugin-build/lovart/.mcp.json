@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "lovart": {
+      "title": "Lovart Creative MCP",
+      "description": "Generate and edit images, videos, audio, and 3D assets through Lovart's official Agent Skill.",
+      "command": "node",
+      "args": [
+        "./scripts/start-mcp.mjs"
+      ],
+      "cwd": "."
+    }
+  }
+}

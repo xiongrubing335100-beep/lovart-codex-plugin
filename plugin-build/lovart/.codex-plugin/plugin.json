@@ -1,0 +1,45 @@
+{
+  "name": "lovart",
+  "version": "0.1.0+codex.20260814122259",
+  "description": "Generate and edit images, videos, audio, and 3D assets with Lovart directly from Codex.",
+  "author": {
+    "name": "Amoiz"
+  },
+  "homepage": "https://www.lovart.ai/",
+  "repository": "https://github.com/lovartai/lovart-skill",
+  "license": "MIT",
+  "keywords": [
+    "lovart",
+    "image-generation",
+    "video-generation",
+    "creative"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Lovart",
+    "shortDescription": "Generate images and videos with Lovart from Codex.",
+    "longDescription": "A dedicated Lovart integration for Codex. Invoke $lovart or ask naturally to generate and edit images, videos, audio, and 3D assets, reuse Lovart projects and threads, upload references, and safely confirm credit-consuming operations.",
+    "developerName": "Amoiz",
+    "category": "Creativity",
+    "capabilities": [
+      "Image generation",
+      "Video generation",
+      "Image and video editing",
+      "Reference uploads",
+      "Project and conversation continuity",
+      "Optionally refresh an existing Lovart project tab"
+    ],
+    "websiteURL": "https://www.lovart.ai/",
+    "brandColor": "#A8C43A",
+    "composerIcon": "./assets/lovart-logo.svg",
+    "logo": "./assets/lovart-logo.svg",
+    "logoDark": "./assets/lovart-logo.svg",
+    "defaultPrompt": [
+      "$lovart \u66f4\u6362\u5bc6\u94a5",
+      "$lovart \u751f\u6210\u4e00\u5f20\u7535\u5f71\u611f\u6d77\u62a5",
+      "$lovart \u7528 Seedance 2.5 \u751f\u6210\u4e00\u6bb5\u89c6\u9891",
+      "$lovart \u7ee7\u7eed\u4fee\u6539\u6211\u6700\u8fd1\u7684 Lovart \u4f5c\u54c1"
+    ]
+  }
+}
