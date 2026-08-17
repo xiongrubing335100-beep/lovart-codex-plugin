@@ -97,6 +97,21 @@ test("resolveLovartEnv uses the latest Windows user credentials", () => {
   assert.equal(resolved.PATH, "test-path");
 });
 
+test("resolveLovartEnv uses macOS Keychain credentials", () => {
+  const values = {
+    LOVART_ACCESS_KEY: "keychain-ak",
+    LOVART_SECRET_KEY: "keychain-sk",
+  };
+  const resolved = resolveLovartEnv(
+    { LOVART_ACCESS_KEY: "old-ak", PATH: "test-path" },
+    { platform: "darwin", readMacVariable: (name) => values[name] || "" },
+  );
+
+  assert.equal(resolved.LOVART_ACCESS_KEY, "keychain-ak");
+  assert.equal(resolved.LOVART_SECRET_KEY, "keychain-sk");
+  assert.equal(resolved.PATH, "test-path");
+});
+
 test("resolveLovartEnv leaves non-Windows environments unchanged", () => {
   const env = { LOVART_ACCESS_KEY: "ak", LOVART_SECRET_KEY: "sk" };
   assert.deepEqual(resolveLovartEnv(env, { platform: "linux" }), env);

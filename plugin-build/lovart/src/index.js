@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { openCredentialSetup } from "./lovart-credentials.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -36,24 +36,6 @@ async function call(args) {
   } catch (error) {
     return failure(error);
   }
-}
-
-function openCredentialSetup() {
-  const scriptPath = path.join(projectRoot, "scripts", "configure-lovart-credentials.ps1");
-  const powershell = path.join(
-    process.env.SystemRoot || "C:\\Windows",
-    "System32",
-    "WindowsPowerShell",
-    "v1.0",
-    "powershell.exe",
-  );
-  const child = spawn(
-    powershell,
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-STA", "-WindowStyle", "Hidden", "-File", scriptPath],
-    { detached: true, stdio: "ignore", windowsHide: true },
-  );
-  child.unref();
-  return response({ opened: true, message: "Lovart key setup window opened." });
 }
 
 const generationSchema = {
@@ -129,7 +111,7 @@ server.registerTool(
       "Open a simple password-style window for adding or replacing Lovart AK/SK credentials. Keys stay local and are never returned to chat. No Codex restart is required after saving.",
     inputSchema: {},
   },
-  async () => openCredentialSetup(),
+  async () => response(openCredentialSetup({ projectRoot })),
 );
 
 server.registerTool(
