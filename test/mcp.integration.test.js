@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -11,12 +13,20 @@ const projectRoot = process.env.LOVART_TEST_PROJECT_ROOT
   : path.resolve(here, "..");
 
 test("Codex-style stdio client discovers Lovart tools", async () => {
+  const testHome = mkdtempSync(path.join(tmpdir(), "lovart-mcp-home-"));
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.join(projectRoot, "src", "index.js")],
+    args: [
+      "--import",
+      path.join(projectRoot, "fixtures", "macos-helper-not-configured.mjs"),
+      path.join(projectRoot, "src", "index.js"),
+    ],
     cwd: projectRoot,
     env: {
       ...process.env,
+      HOME: testHome,
+      LOVART_ACCESS_KEY: "fixture-ak",
+      LOVART_SECRET_KEY: "fixture-sk",
       LOVART_OUTPUT_DIR:
         process.env.LOVART_TEST_OUTPUT_DIR
         || path.join(projectRoot, ".lovart-test-state", "downloads"),
@@ -35,6 +45,17 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
     assert.ok(names.includes("lovart_upload"));
     assert.ok(names.includes("lovart_config"));
     assert.ok(names.includes("lovart_configure_credentials"));
+
+    if (process.platform === "darwin") {
+      const config = await client.callTool({ name: "lovart_config", arguments: {} });
+      assert.equal(config.isError, true);
+      assert.deepEqual(config.content, [{
+        type: "text",
+        text: "Lovart credentials are not configured on this Mac. Run Lovart credential setup.",
+      }]);
+      assert.equal(JSON.stringify(config).includes("fixture-ak"), false);
+      assert.equal(JSON.stringify(config).includes("fixture-sk"), false);
+    }
 
     if (process.env.LOVART_TEST_UPLOAD_FILE) {
       const upload = await client.callTool({
@@ -55,6 +76,10 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
       assert.ok(Array.isArray(result.structuredContent.downloaded));
     }
   } finally {
-    await client.close();
+    try {
+      await client.close();
+    } finally {
+      rmSync(testHome, { recursive: true, force: true });
+    }
   }
 });

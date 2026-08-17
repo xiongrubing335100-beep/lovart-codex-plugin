@@ -67,14 +67,18 @@ export function resolveLovartEnv(
   {
     platform = process.platform,
     readUserVariable = readWindowsUserVariable,
-    readMacCredentials = () => readMacOSCredentials({
-      helperPath: installMacOSCredentialHelper({ projectRoot }),
-    }),
+    installMacCredentialHelper = installMacOSCredentialHelper,
+    invokeMacCredentialHelper = readMacOSCredentials,
+    readMacCredentials,
   } = {},
 ) {
   const resolved = { ...env };
   if (platform === "darwin") {
-    const credentials = readMacCredentials();
+    const credentials = readMacCredentials
+      ? readMacCredentials()
+      : invokeMacCredentialHelper({
+        helperPath: installMacCredentialHelper({ projectRoot }),
+      });
     const accessKey = credentials?.accessKey;
     const secretKey = credentials?.secretKey;
     if (
@@ -126,6 +130,8 @@ export async function runLovart(
     outputDir = process.env.LOVART_OUTPUT_DIR || defaultOutputDir,
     env = process.env,
     platform = process.platform,
+    installMacCredentialHelper,
+    invokeMacCredentialHelper,
     readMacCredentials,
     spawnProcess = spawn,
   } = {},
@@ -134,7 +140,12 @@ export async function runLovart(
   const pythonCommand = python || resolvePython(env);
 
   return new Promise((resolve, reject) => {
-    let childEnv = resolveLovartChildEnv(env, { platform, readMacCredentials });
+    let childEnv = resolveLovartChildEnv(env, {
+      platform,
+      installMacCredentialHelper,
+      invokeMacCredentialHelper,
+      readMacCredentials,
+    });
     let child;
     try {
       child = spawnProcess(pythonCommand, [scriptPath, ...args], {

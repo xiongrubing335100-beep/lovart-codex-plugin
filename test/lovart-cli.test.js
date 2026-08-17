@@ -132,6 +132,31 @@ test("resolveLovartEnv ignores stale macOS process credentials", () => {
   assert.equal(resolved.PATH, "test-path");
 });
 
+test("resolveLovartEnv installs then reads the same helper path for every macOS operation", () => {
+  const calls = [];
+  const options = {
+    platform: "darwin",
+    installMacCredentialHelper: () => {
+      calls.push(["install"]);
+      return "/installed/lovart-credential-helper";
+    },
+    invokeMacCredentialHelper: (readOptions = {}) => {
+      calls.push(["read", readOptions.helperPath]);
+      return { accessKey: "fresh-ak", secretKey: "fresh-sk" };
+    },
+  };
+
+  resolveLovartEnv({}, options);
+  resolveLovartEnv({}, options);
+
+  assert.deepEqual(calls, [
+    ["install"],
+    ["read", "/installed/lovart-credential-helper"],
+    ["install"],
+    ["read", "/installed/lovart-credential-helper"],
+  ]);
+});
+
 test("resolveLovartEnv rejects an incomplete macOS helper pair", () => {
   assert.throws(
     () => resolveLovartEnv({}, {
