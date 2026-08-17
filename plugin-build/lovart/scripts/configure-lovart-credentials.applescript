@@ -22,8 +22,6 @@ try
 	do shell script "/usr/bin/security add-generic-password -U -s " & quoted form of serviceName & " -a " & quoted form of accessAccount & " -w " & quoted form of accessKey
 	do shell script "/usr/bin/security add-generic-password -U -s " & quoted form of serviceName & " -a " & quoted form of secretAccount & " -w " & quoted form of secretKey
 	display dialog "Lovart keys saved in your macOS Keychain." with title "Lovart Key Setup" buttons {"OK"} default button "OK"
-on error number -128
-	return
-on error
-	display alert "Lovart keys could not be saved to the macOS Keychain." as critical
+on error errMsg number errNum
+	if errNum is not -128 then display alert "Lovart keys could not be saved to the macOS Keychain." as critical
 end try
