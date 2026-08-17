@@ -72,6 +72,7 @@ export function resolveLovartEnv(
   if (!reader) return resolved;
 
   for (const name of ["LOVART_ACCESS_KEY", "LOVART_SECRET_KEY"]) {
+    if (platform === "darwin" && resolved[name]) continue;
     const value = reader(name);
     if (value) resolved[name] = value;
   }

@@ -103,13 +103,29 @@ test("resolveLovartEnv uses macOS Keychain credentials", () => {
     LOVART_SECRET_KEY: "keychain-sk",
   };
   const resolved = resolveLovartEnv(
-    { LOVART_ACCESS_KEY: "old-ak", PATH: "test-path" },
+    { PATH: "test-path" },
     { platform: "darwin", readMacVariable: (name) => values[name] || "" },
   );
 
   assert.equal(resolved.LOVART_ACCESS_KEY, "keychain-ak");
   assert.equal(resolved.LOVART_SECRET_KEY, "keychain-sk");
   assert.equal(resolved.PATH, "test-path");
+});
+
+test("resolveLovartEnv keeps current macOS session credentials over stale Keychain values", () => {
+  const resolved = resolveLovartEnv(
+    { LOVART_ACCESS_KEY: "session-ak", LOVART_SECRET_KEY: "session-sk" },
+    {
+      platform: "darwin",
+      readMacVariable: (name) => ({
+        LOVART_ACCESS_KEY: "stale-ak",
+        LOVART_SECRET_KEY: "stale-sk",
+      })[name],
+    },
+  );
+
+  assert.equal(resolved.LOVART_ACCESS_KEY, "session-ak");
+  assert.equal(resolved.LOVART_SECRET_KEY, "session-sk");
 });
 
 test("resolveLovartEnv leaves non-Windows environments unchanged", () => {

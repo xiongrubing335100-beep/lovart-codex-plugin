@@ -7,6 +7,27 @@ export const macOSKeychainAccounts = Object.freeze({
   secret: "LOVART_SECRET_KEY",
 });
 
+const macOSSessionPromptSource = String.raw`
+const app = Application.currentApplication();
+app.includeStandardAdditions = true;
+
+function readSecret(message) {
+  const response = app.displayDialog(message, {
+    defaultAnswer: "",
+    hiddenAnswer: true,
+    buttons: ["Cancel", "Continue"],
+    defaultButton: "Continue",
+    cancelButton: "Cancel",
+  });
+  return response.textReturned.trim();
+}
+
+const accessKey = readSecret("Enter your Lovart Access Key (AK).");
+const secretKey = readSecret("Enter your Lovart Secret Key (SK).");
+if (!accessKey || !secretKey) throw new Error("Both Lovart keys are required.");
+JSON.stringify({ accessKey, secretKey });
+`;
+
 export function readMacOSKeychainVariable(name, { run = execFileSync } = {}) {
   try {
     const output = run(
@@ -18,6 +39,48 @@ export function readMacOSKeychainVariable(name, { run = execFileSync } = {}) {
   } catch {
     return "";
   }
+}
+
+export function configureMacOSSessionCredentials({
+  env = process.env,
+  run = execFileSync,
+} = {}) {
+  try {
+    const output = run(
+      "osascript",
+      ["-l", "JavaScript", "-e", macOSSessionPromptSource],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    const credentials = JSON.parse(String(output).trim());
+    if (!credentials.accessKey || !credentials.secretKey) throw new Error("Missing credentials.");
+
+    env.LOVART_ACCESS_KEY = credentials.accessKey;
+    env.LOVART_SECRET_KEY = credentials.secretKey;
+    return {
+      configured: true,
+      message: "Lovart credentials loaded for this MCP session.",
+    };
+  } catch {
+    return {
+      configured: false,
+      message: "Lovart key setup cancelled.",
+    };
+  }
+}
+
+export function configureCredentialsForPlatform({
+  platform = process.platform,
+  projectRoot,
+  env = process.env,
+  run = execFileSync,
+  spawnProcess = spawn,
+  systemRoot = process.env.SystemRoot || "C:\\Windows",
+} = {}) {
+  if (platform === "darwin") {
+    return configureMacOSSessionCredentials({ env, run });
+  }
+
+  return openCredentialSetup({ platform, projectRoot, spawnProcess, systemRoot });
 }
 
 export function openCredentialSetup({

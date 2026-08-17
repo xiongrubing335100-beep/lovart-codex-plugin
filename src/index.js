@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { openCredentialSetup } from "./lovart-credentials.js";
+import { configureCredentialsForPlatform } from "./lovart-credentials.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -108,10 +108,10 @@ server.registerTool(
   "lovart_configure_credentials",
   {
     description:
-      "Open a simple password-style window for adding or replacing Lovart AK/SK credentials. Keys stay local and are never returned to chat. No Codex restart is required after saving.",
+      "Open password-style dialogs for adding or replacing Lovart AK/SK credentials. On macOS, keys remain only in the current plugin process and must be entered again after a plugin restart. Keys are never returned to chat.",
     inputSchema: {},
   },
-  async () => response(openCredentialSetup({ projectRoot })),
+  async () => response(configureCredentialsForPlatform({ projectRoot })),
 );
 
 server.registerTool(
