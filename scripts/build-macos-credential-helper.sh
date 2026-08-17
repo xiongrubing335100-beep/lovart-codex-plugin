@@ -28,4 +28,8 @@ xcrun lipo -create \
   -output "$output"
 codesign --force --sign - "$output"
 chmod 700 "$output"
+if [ "$(stat -f '%OLp' "$output")" != "700" ]; then
+  echo "credential helper mode is not 0700" >&2
+  exit 1
+fi
 shasum -a 256 "$output" | awk '{print $1}' > "$output.sha256"
