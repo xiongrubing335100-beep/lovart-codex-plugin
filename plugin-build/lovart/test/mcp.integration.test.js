@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,8 @@ const projectRoot = process.env.LOVART_TEST_PROJECT_ROOT
 
 test("Codex-style stdio client discovers Lovart tools", async () => {
   const testHome = mkdtempSync(path.join(tmpdir(), "lovart-mcp-home-"));
+  const testOutputDir = mkdtempSync(path.join(tmpdir(), "lovart-mcp-output-"));
+  const forbiddenTestState = path.join(projectRoot, ".lovart-test-state");
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [
@@ -27,9 +29,7 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
       HOME: testHome,
       LOVART_ACCESS_KEY: "fixture-ak",
       LOVART_SECRET_KEY: "fixture-sk",
-      LOVART_OUTPUT_DIR:
-        process.env.LOVART_TEST_OUTPUT_DIR
-        || path.join(projectRoot, ".lovart-test-state", "downloads"),
+      LOVART_OUTPUT_DIR: process.env.LOVART_TEST_OUTPUT_DIR || testOutputDir,
     },
     stderr: "pipe",
   });
@@ -80,6 +80,12 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
       await client.close();
     } finally {
       rmSync(testHome, { recursive: true, force: true });
+      rmSync(testOutputDir, { recursive: true, force: true });
+      assert.equal(
+        existsSync(forbiddenTestState),
+        false,
+        "MCP integration tests must not leave plugin-local test state",
+      );
     }
   }
 });
