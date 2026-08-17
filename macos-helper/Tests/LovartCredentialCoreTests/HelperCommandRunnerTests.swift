@@ -25,9 +25,26 @@ private struct FixedPrompt: CredentialPrompting {
     func prompt() -> CredentialPromptResult { result }
 }
 
+private final class RecordingPrompt: CredentialPrompting {
+    private(set) var callCount = 0
+    let result: CredentialPromptResult
+
+    init(result: CredentialPromptResult) {
+        self.result = result
+    }
+
+    func prompt() -> CredentialPromptResult {
+        callCount += 1
+        return result
+    }
+}
+
 private final class RecordingCredentialStore: CredentialStoring {
     private(set) var current: LovartCredentials?
     private(set) var saved: [LovartCredentials] = []
+    private(set) var saveCallCount = 0
+    private(set) var loadCallCount = 0
+    private(set) var statusCallCount = 0
     var saveFailure: HelperFailure?
     var loadFailure: HelperFailure?
     var statusFailure: HelperFailure?
@@ -37,18 +54,21 @@ private final class RecordingCredentialStore: CredentialStoring {
     }
 
     func save(_ credentials: LovartCredentials) throws {
+        saveCallCount += 1
         if let saveFailure { throw saveFailure }
         saved.append(credentials)
         current = credentials
     }
 
     func load() throws -> LovartCredentials {
+        loadCallCount += 1
         if let loadFailure { throw loadFailure }
         guard let current else { throw HelperFailure.notConfigured }
         return current
     }
 
     func status() throws -> CredentialStatus {
+        statusCallCount += 1
         if let statusFailure { throw statusFailure }
         guard current != nil else { throw HelperFailure.notConfigured }
         return CredentialStatus(
@@ -124,15 +144,52 @@ private final class RecordingCredentialStore: CredentialStoring {
         )
         #expect(trusted.run(.read).credentials == .fixture)
 
+        let deniedStore = RecordingCredentialStore(existing: .fixture)
         let denied = HelperCommandRunner(
             caller: NeverTrustedCaller(),
-            store: RecordingCredentialStore(existing: .fixture),
+            store: deniedStore,
             prompt: FixedPrompt(result: .cancelled)
         )
         let response = denied.run(.read)
         #expect(response.status == "error")
         #expect(response.errorCode == .callerNotTrusted)
         #expect(response.credentials == nil)
+        #expect(deniedStore.loadCallCount == 0)
+    }
+
+    @Test func untrustedConfigureNeverPromptsOrTouchesStore() {
+        let store = RecordingCredentialStore(existing: .fixture)
+        let prompt = RecordingPrompt(result: .credentials(.fixture))
+        let response = HelperCommandRunner(
+            caller: NeverTrustedCaller(),
+            store: store,
+            prompt: prompt
+        ).run(.configure)
+
+        #expect(response.status == "error")
+        #expect(response.errorCode == .callerNotTrusted)
+        #expect(prompt.callCount == 0)
+        #expect(store.saveCallCount == 0)
+        #expect(store.loadCallCount == 0)
+        #expect(store.statusCallCount == 0)
+        #expect(store.current == .fixture)
+    }
+
+    @Test func untrustedStatusNeverTouchesStore() {
+        let store = RecordingCredentialStore(existing: .fixture)
+        let prompt = RecordingPrompt(result: .cancelled)
+        let response = HelperCommandRunner(
+            caller: NeverTrustedCaller(),
+            store: store,
+            prompt: prompt
+        ).run(.status)
+
+        #expect(response.status == "error")
+        #expect(response.errorCode == .callerNotTrusted)
+        #expect(prompt.callCount == 0)
+        #expect(store.saveCallCount == 0)
+        #expect(store.loadCallCount == 0)
+        #expect(store.statusCallCount == 0)
     }
 
     @Test func callerInspectionFailureFailsClosed() {

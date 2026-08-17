@@ -22,6 +22,7 @@ public enum ProcessInspectionError: Error, Equatable {
 public protocol ProcessInspecting {
     func parentPID(of pid: pid_t) throws -> pid_t
     func signatureIdentity(of pid: pid_t) throws -> CodeSignatureIdentity
+    func isSignatureValid(of pid: pid_t) throws -> Bool
 }
 
 public protocol CallerValidating {
@@ -50,15 +51,21 @@ public struct CallerValidator: CallerValidating {
     public func isTrusted(startingAt pid: pid_t) throws -> Bool {
         var current = pid
         var visited = Set<pid_t>()
-        while current > 1 && visited.insert(current).inserted {
+        var trustedIdentityFound = false
+        while current > 1 {
+            guard visited.insert(current).inserted else {
+                return false
+            }
             let identity = try processes.signatureIdentity(of: current)
             if identity.teamIdentifier == Self.team
                 && Self.identifiers.contains(identity.identifier) {
-                return true
+                if try processes.isSignatureValid(of: current) {
+                    trustedIdentityFound = true
+                }
             }
             current = try processes.parentPID(of: current)
         }
-        return false
+        return current == 1 && trustedIdentityFound
     }
 }
 
@@ -76,14 +83,14 @@ public struct SystemProcessInspector: ProcessInspecting {
     }
 
     public func signatureIdentity(of pid: pid_t) throws -> CodeSignatureIdentity {
-        let attributes = [kSecGuestAttributePid as String: NSNumber(value: pid)] as CFDictionary
-        var code: SecCode?
-        let guestStatus = SecCodeCopyGuestWithAttributes(nil, attributes, [], &code)
-        if guestStatus == errSecCSUnsigned {
+        let code: SecCode
+        do {
+            code = try dynamicCode(for: pid)
+        } catch ProcessInspectionError.signatureInspectionFailed(_, errSecCSUnsigned) {
             return .unsigned
         }
-        guard guestStatus == errSecSuccess, let code else {
-            throw ProcessInspectionError.signatureInspectionFailed(pid, guestStatus)
+        guard hasStrictlyValidSignature(code) else {
+            return .unsigned
         }
 
         var staticCode: SecStaticCode?
@@ -116,5 +123,28 @@ public struct SystemProcessInspector: ProcessInspecting {
             return .unsigned
         }
         return CodeSignatureIdentity(identifier: identifier, teamIdentifier: teamIdentifier)
+    }
+
+    public func isSignatureValid(of pid: pid_t) throws -> Bool {
+        let code = try dynamicCode(for: pid)
+        return hasStrictlyValidSignature(code)
+    }
+
+    private func hasStrictlyValidSignature(_ code: SecCode) -> Bool {
+        SecCodeCheckValidity(
+            code,
+            SecCSFlags(rawValue: kSecCSStrictValidate),
+            nil
+        ) == errSecSuccess
+    }
+
+    private func dynamicCode(for pid: pid_t) throws -> SecCode {
+        let attributes = [kSecGuestAttributePid as String: NSNumber(value: pid)] as CFDictionary
+        var code: SecCode?
+        let status = SecCodeCopyGuestWithAttributes(nil, attributes, [], &code)
+        guard status == errSecSuccess, let code else {
+            throw ProcessInspectionError.signatureInspectionFailed(pid, status)
+        }
+        return code
     }
 }

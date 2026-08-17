@@ -9,15 +9,18 @@ private enum FakeInspectionFailure: Error {
 private struct FakeProcessInspector: ProcessInspecting {
     let parents: [pid_t: pid_t]
     let identities: [pid_t: CodeSignatureIdentity]
+    let validSignaturePIDs: Set<pid_t>
     let failingPIDs: Set<pid_t>
 
     init(
         parents: [pid_t: pid_t] = [:],
         identities: [pid_t: CodeSignatureIdentity] = [:],
+        validSignaturePIDs: Set<pid_t> = [],
         failingPIDs: Set<pid_t> = []
     ) {
         self.parents = parents
         self.identities = identities
+        self.validSignaturePIDs = validSignaturePIDs
         self.failingPIDs = failingPIDs
     }
 
@@ -36,6 +39,13 @@ private struct FakeProcessInspector: ProcessInspecting {
         }
         return identities[pid, default: .unsigned]
     }
+
+    func isSignatureValid(of pid: pid_t) throws -> Bool {
+        guard !failingPIDs.contains(pid) else {
+            throw FakeInspectionFailure.unavailable
+        }
+        return validSignaturePIDs.contains(pid)
+    }
 }
 
 @Suite struct CallerValidatorTests {
@@ -45,7 +55,8 @@ private struct FakeProcessInspector: ProcessInspecting {
             identities: [
                 700: .unsigned,
                 600: CodeSignatureIdentity(identifier: "codex", teamIdentifier: "2DC432GLL2"),
-            ]
+            ],
+            validSignaturePIDs: [600]
         )
 
         #expect(try CallerValidator(processes: processes).isTrusted(startingAt: 700))
@@ -59,7 +70,8 @@ private struct FakeProcessInspector: ProcessInspecting {
                     identifier: "com.openai.codex",
                     teamIdentifier: "2DC432GLL2"
                 ),
-            ]
+            ],
+            validSignaturePIDs: [700]
         )
 
         #expect(try CallerValidator(processes: processes).isTrusted(startingAt: 700))
@@ -95,6 +107,48 @@ private struct FakeProcessInspector: ProcessInspecting {
 
     @Test func cyclicAncestryFailsClosed() throws {
         let processes = FakeProcessInspector(parents: [700: 600, 600: 700])
+
+        #expect(try !CallerValidator(processes: processes).isTrusted(startingAt: 700))
+    }
+
+    @Test func trustedMatchDoesNotHideLaterInspectionFailure() {
+        let processes = FakeProcessInspector(
+            parents: [700: 600],
+            identities: [
+                700: CodeSignatureIdentity(identifier: "codex", teamIdentifier: "2DC432GLL2"),
+            ],
+            validSignaturePIDs: [700],
+            failingPIDs: [600]
+        )
+
+        #expect(throws: FakeInspectionFailure.self) {
+            try CallerValidator(processes: processes).isTrusted(startingAt: 700)
+        }
+    }
+
+    @Test func trustedMatchDoesNotHideLaterAncestryCycle() throws {
+        let processes = FakeProcessInspector(
+            parents: [700: 600, 600: 700],
+            identities: [
+                700: CodeSignatureIdentity(identifier: "codex", teamIdentifier: "2DC432GLL2"),
+            ],
+            validSignaturePIDs: [700]
+        )
+
+        #expect(try !CallerValidator(processes: processes).isTrusted(startingAt: 700))
+    }
+
+    @Test func rejectsTrustedMetadataFromInvalidCodeSignature() throws {
+        let processes = FakeProcessInspector(
+            parents: [700: 1],
+            identities: [
+                700: CodeSignatureIdentity(
+                    identifier: "com.openai.codex",
+                    teamIdentifier: "2DC432GLL2"
+                ),
+            ],
+            validSignaturePIDs: []
+        )
 
         #expect(try !CallerValidator(processes: processes).isTrusted(startingAt: 700))
     }
