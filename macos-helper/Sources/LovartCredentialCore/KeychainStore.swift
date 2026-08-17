@@ -87,7 +87,8 @@ public final class SystemKeychainStore: CredentialStoring {
             throw failure(for: status, during: .read)
         }
         guard let data = result as? Data,
-              let credentials = try? JSONDecoder().decode(LovartCredentials.self, from: data)
+              let credentials = try? JSONDecoder().decode(LovartCredentials.self, from: data),
+              credentials.isValid
         else {
             throw HelperFailure.invalidPayload
         }
@@ -109,12 +110,18 @@ public final class SystemKeychainStore: CredentialStoring {
 
         let synchronizable = attributes[kSecAttrSynchronizable as String] as? Bool ?? false
         let accessible = attributes[kSecAttrAccessible as String] as? String
+        let accessibility: String
+        if let accessible {
+            accessibility = accessible == (kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
+                ? "when_unlocked_this_device_only"
+                : "unknown"
+        } else {
+            accessibility = "when_unlocked_this_device_only"
+        }
         return CredentialStatus(
             configured: true,
             synchronizable: synchronizable,
-            accessibility: accessible == (kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
-                ? "when_unlocked_this_device_only"
-                : "unknown"
+            accessibility: accessibility
         )
     }
 

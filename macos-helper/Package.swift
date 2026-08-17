@@ -20,22 +20,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LovartCredentialCoreTests",
-            dependencies: ["LovartCredentialCore"],
-            swiftSettings: [
-                .unsafeFlags([
-                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                ])
-            ],
-            linkerSettings: [
-                .linkedFramework("Testing"),
-                .unsafeFlags([
-                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/usr/lib",
-                ]),
-            ]
+            dependencies: ["LovartCredentialCore"]
         ),
     ]
 )
