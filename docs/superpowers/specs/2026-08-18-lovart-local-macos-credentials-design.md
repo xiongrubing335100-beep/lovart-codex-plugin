@@ -78,8 +78,8 @@ This check prevents an ordinary unrelated application from invoking the helper d
 4. The helper validates that both trimmed values are non-empty before changing Keychain state.
 5. The helper performs a single add-or-update operation for the combined Keychain payload.
 6. macOS may display its one-time authorization prompt.
-7. The helper returns only `{ configured: true }` or a typed cancellation/error result.
-8. For immediate use in the current MCP session, the helper supplies the newly entered pair through its private captured stdout pipe. The MCP updates only its own process environment; it does not return the values through MCP.
+7. The helper returns only `{ configured: true }` or a typed cancellation/error result. It never returns the newly entered pair in configure mode.
+8. The next Lovart operation uses the normal per-request read flow, so the saved pair takes effect immediately without retaining it in the MCP process.
 
 ### Normal Lovart request
 
