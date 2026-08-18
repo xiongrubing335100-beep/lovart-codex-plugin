@@ -47,6 +47,20 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
     assert.ok(names.includes("lovart_configure_credentials"));
 
     if (process.platform === "darwin") {
+      const opened = await client.callTool({
+        name: "lovart_configure_credentials",
+        arguments: {},
+      });
+      assert.equal(opened.isError, undefined);
+      assert.deepEqual(opened.structuredContent, {
+        opened: true,
+        message: "Lovart credential setup window opened.",
+      });
+      assert.equal(JSON.stringify(opened).includes("fixture-ak"), false);
+      assert.equal(JSON.stringify(opened).includes("fixture-sk"), false);
+      assert.equal(JSON.stringify(opened).includes("accessKey"), false);
+      assert.equal(JSON.stringify(opened).includes("secretKey"), false);
+
       const config = await client.callTool({ name: "lovart_config", arguments: {} });
       assert.equal(config.isError, true);
       assert.deepEqual(config.content, [{
