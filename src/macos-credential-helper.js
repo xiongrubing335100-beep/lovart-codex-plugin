@@ -383,7 +383,7 @@ function invokeHelper({ helperPath, command, run }) {
     return parseOneHelperResponse(run(helperPath, [command], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30_000,
+      ...(command === "configure" ? {} : { timeout: 30_000 }),
     }));
   } catch (error) {
     if (error instanceof MacOSCredentialError) throw error;

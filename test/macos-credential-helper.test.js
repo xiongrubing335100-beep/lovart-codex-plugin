@@ -385,6 +385,38 @@ test("configure returns status without credentials", () => {
   assert.equal(JSON.stringify(result).includes("accessKey"), false);
 });
 
+test("uses an unbounded configure wait while read and status stay bounded", () => {
+  const optionsByCommand = {};
+  const run = (_helperPath, [command], options) => {
+    optionsByCommand[command] = options;
+    if (command === "configure") return JSON.stringify({ status: "ok", configured: true });
+    if (command === "read") {
+      return JSON.stringify({
+        status: "ok",
+        credentials: { accessKey: "ak-fixture", secretKey: "sk-fixture" },
+      });
+    }
+    return JSON.stringify({
+      status: "ok",
+      credentialStatus: {
+        configured: true,
+        synchronizable: false,
+        accessibility: "when_unlocked_this_device_only",
+      },
+    });
+  };
+
+  configureMacOSCredentials({ helperPath: "/fixture/helper", run });
+  readMacOSCredentials({ helperPath: "/fixture/helper", run });
+  getMacOSCredentialStatus({ helperPath: "/fixture/helper", run });
+
+  assert.deepEqual(optionsByCommand, {
+    configure: { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    read: { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 },
+    status: { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 },
+  });
+});
+
 test("read maps private helper payload and never includes it in errors", () => {
   const value = readMacOSCredentials({
     helperPath: "/fixture/helper",
