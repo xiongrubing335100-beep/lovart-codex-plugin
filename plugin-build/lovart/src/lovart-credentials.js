@@ -1,24 +1,34 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import {
-  configureMacOSCredentials,
+  MacOSCredentialError,
   installMacOSCredentialHelper,
 } from "./macos-credential-helper.js";
 
-function configureInstalledMacOSCredentials({ projectRoot }) {
-  const helperPath = installMacOSCredentialHelper({ projectRoot });
-  return configureMacOSCredentials({ helperPath });
+function openInstalledMacOSCredentialSetup({ projectRoot, installMacHelper, spawnProcess }) {
+  const helperPath = installMacHelper({ projectRoot });
+  try {
+    const child = spawnProcess(helperPath, ["configure"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch {
+    throw new MacOSCredentialError("helper_missing_or_invalid");
+  }
+  return { opened: true, message: "Lovart credential setup window opened." };
 }
 
 export function configureCredentialsForPlatform({
   platform = process.platform,
   projectRoot,
-  configureMacCredentials = configureInstalledMacOSCredentials,
+  configureMacCredentials = openInstalledMacOSCredentialSetup,
+  installMacHelper = installMacOSCredentialHelper,
   spawnProcess = spawn,
   systemRoot = process.env.SystemRoot || "C:\\Windows",
 } = {}) {
   if (platform === "darwin") {
-    return configureMacCredentials({ projectRoot });
+    return configureMacCredentials({ projectRoot, installMacHelper, spawnProcess });
   }
 
   return openCredentialSetup({ platform, projectRoot, spawnProcess, systemRoot });
