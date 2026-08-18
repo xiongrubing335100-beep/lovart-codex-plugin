@@ -11,6 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -25,6 +26,9 @@ const manifestPattern = /^[0-9a-f]{64}\n$/;
 const maximumHelperResponseBytes = 16 * 1024;
 const minimumInt32 = -(2 ** 31);
 const maximumInt32 = (2 ** 31) - 1;
+const trustedPreviousHelperHashes = Object.freeze([
+  "f254b328a2c1fbf4665c3733173539b3620e88a0f047d8fc52bc17f9e6531b25",
+]);
 const helperErrorMessages = Object.freeze({
   not_configured: "Lovart credentials are not configured on this Mac. Run Lovart credential setup.",
   cancelled: "Lovart credential setup was cancelled.",
@@ -81,6 +85,31 @@ function isInt32(value) {
 
 function requireNoFollow() {
   if (!Number.isInteger(fsConstants.O_NOFOLLOW)) throw helperInvalid();
+}
+
+function inspectInstalledHelper(file, expectedIdentity) {
+  requireNoFollow();
+  const named = lstatSync(file);
+  if (!named.isFile() || named.isSymbolicLink()) throw helperInvalid();
+  if (expectedIdentity && !sameInode(named, expectedIdentity)) throw helperInvalid();
+
+  const descriptor = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || !sameInode(named, opened) || (expectedIdentity && !sameInode(opened, expectedIdentity))) {
+      throw helperInvalid();
+    }
+    const bytes = readFileSync(descriptor);
+    const afterRead = fstatSync(descriptor);
+    const current = lstatSync(file);
+    if (!sameInode(opened, afterRead) || !sameInode(opened, current)) throw helperInvalid();
+    return {
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      identity: opened,
+    };
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function readValidatedRegularFile(file, expectedHash, expectedIdentity) {
@@ -250,6 +279,7 @@ export function installMacOSCredentialHelper({
   const bundledHelper = path.join(projectRoot, "bin", "macos", "lovart-credential-helper");
   const manifest = `${bundledHelper}.sha256`;
   let temporary;
+  let installedPredecessor;
 
   try {
     const expectedHash = expectedHashFromManifest(manifest);
@@ -265,8 +295,13 @@ export function installMacOSCredentialHelper({
     const installDirectory = ensureSafeInstallDirectory(homeDir);
 
     if (destinationExists(installedHelper)) {
-      validateInstalledHelper(installedHelper, expectedHash);
-      return installedHelper;
+      const installed = inspectInstalledHelper(installedHelper);
+      if (installed.hash === expectedHash) {
+        validateInstalledHelper(installedHelper, expectedHash, installed.identity);
+        return installedHelper;
+      }
+      if (!trustedPreviousHelperHashes.includes(installed.hash)) throw helperInvalid();
+      installedPredecessor = installed;
     }
 
     temporary = createPrivateTemporary(
@@ -278,6 +313,25 @@ export function installMacOSCredentialHelper({
     readValidatedRegularFile(temporary.file, expectedHash, temporary.identity);
 
     beforePublish?.({ temporaryFile: temporary.file, installedHelper });
+
+    if (installedPredecessor) {
+      const current = inspectInstalledHelper(installedHelper);
+      if (current.hash === expectedHash) {
+        validateInstalledHelper(installedHelper, expectedHash, current.identity);
+        return installedHelper;
+      }
+      if (
+        !sameInode(current.identity, installedPredecessor.identity) ||
+        current.hash !== installedPredecessor.hash ||
+        !trustedPreviousHelperHashes.includes(current.hash)
+      ) {
+        throw helperInvalid();
+      }
+
+      renameSync(temporary.file, installedHelper);
+      validateInstalledHelper(installedHelper, expectedHash, temporary.identity);
+      return installedHelper;
+    }
 
     try {
       linkSync(temporary.file, installedHelper);

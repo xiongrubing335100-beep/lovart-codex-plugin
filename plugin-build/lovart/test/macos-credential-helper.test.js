@@ -9,6 +9,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -17,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import {
   MacOSCredentialError,
   configureMacOSCredentials,
@@ -25,6 +27,11 @@ import {
   installMacOSCredentialHelper,
   readMacOSCredentials,
 } from "../src/macos-credential-helper.js";
+
+const publishedPreviousHash = "f254b328a2c1fbf4665c3733173539b3620e88a0f047d8fc52bc17f9e6531b25";
+const publishedPreviousBytes = gunzipSync(readFileSync(
+  new URL("../fixtures/macos-helper-localkeychain1.gz", import.meta.url),
+));
 
 function createHelperFixture() {
   const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "lovart-helper-node-test-"));
@@ -61,6 +68,17 @@ function withFixture(fn) {
   }
 }
 
+function writeInstalledHelper(fixture, bytes, mode = 0o700) {
+  const installed = path.join(fixture.homeDir, helperRelativeInstallPath);
+  mkdirSync(path.dirname(installed), { recursive: true });
+  writeFileSync(installed, bytes, { mode });
+  return installed;
+}
+
+function migrationTemporaryEntries(installed) {
+  return readdirSync(path.dirname(installed)).filter((entry) => entry.endsWith(".tmp"));
+}
+
 test("installs a verified helper atomically with owner-only permissions", () => {
   withFixture((fixture) => {
     const installed = installMacOSCredentialHelper(fixture);
@@ -76,21 +94,154 @@ test("installs a verified helper atomically with owner-only permissions", () => 
   });
 });
 
-test("preserves a valid v1 helper and rejects a changed one", () => {
+test("atomically upgrades the exact published predecessor to current owner-only bytes", () => {
   withFixture((fixture) => {
-    const installed = installMacOSCredentialHelper(fixture);
-    const originalMtime = new Date("2020-01-01T00:00:00.000Z");
-    utimesSync(installed, originalMtime, originalMtime);
-    const firstMtime = statSync(installed).mtimeMs;
+    assert.equal(
+      createHash("sha256").update(publishedPreviousBytes).digest("hex"),
+      publishedPreviousHash,
+    );
+    const installed = writeInstalledHelper(fixture, publishedPreviousBytes, 0o755);
+    const previousIdentity = lstatSync(installed);
 
     assert.equal(installMacOSCredentialHelper(fixture), installed);
-    assert.equal(statSync(installed).mtimeMs, firstMtime);
 
-    writeFileSync(installed, "tampered");
+    assert.deepEqual(readFileSync(installed), fixture.binaryBytes);
+    assert.notEqual(lstatSync(installed).ino, previousIdentity.ino);
+    assert.equal(statSync(installed).mode & 0o777, 0o700);
+    assert.equal(
+      createHash("sha256").update(readFileSync(installed)).digest("hex"),
+      createHash("sha256").update(fixture.binaryBytes).digest("hex"),
+    );
+    assert.deepEqual(migrationTemporaryEntries(installed), []);
+  });
+});
+
+test("rejects and preserves an installed helper with an unknown hash", () => {
+  withFixture((fixture) => {
+    const unknownBytes = Buffer.from("unknown changed helper");
+    const installed = writeInstalledHelper(fixture, unknownBytes);
+    const previousIdentity = lstatSync(installed);
+
     assert.throws(
       () => installMacOSCredentialHelper(fixture),
       (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
     );
+
+    assert.deepEqual(readFileSync(installed), unknownBytes);
+    assert.equal(lstatSync(installed).ino, previousIdentity.ino);
+    assert.deepEqual(migrationTemporaryEntries(installed), []);
+  });
+});
+
+test("leaves a valid current helper inode and mtime untouched", () => {
+  withFixture((fixture) => {
+    const installed = installMacOSCredentialHelper(fixture);
+    const originalMtime = new Date("2020-01-01T00:00:00.000Z");
+    utimesSync(installed, originalMtime, originalMtime);
+    const firstIdentity = lstatSync(installed);
+    const firstMtime = statSync(installed).mtimeMs;
+
+    assert.equal(installMacOSCredentialHelper(fixture), installed);
+    assert.equal(lstatSync(installed).ino, firstIdentity.ino);
+    assert.equal(statSync(installed).mtimeMs, firstMtime);
+    assert.deepEqual(migrationTemporaryEntries(installed), []);
+  });
+});
+
+test("accepts a concurrent migration winner only when it published current bytes", () => {
+  withFixture((fixture) => {
+    const installed = writeInstalledHelper(fixture, publishedPreviousBytes);
+    let hookCalled = false;
+    let winnerIdentity;
+
+    const result = installMacOSCredentialHelper({
+      ...fixture,
+      beforePublish() {
+        hookCalled = true;
+        const winner = `${installed}.winner`;
+        writeFileSync(winner, fixture.binaryBytes, { mode: 0o700 });
+        renameSync(winner, installed);
+        winnerIdentity = lstatSync(installed);
+      },
+    });
+
+    assert.equal(result, installed);
+    assert.equal(hookCalled, true);
+    assert.equal(lstatSync(installed).ino, winnerIdentity.ino);
+    assert.deepEqual(readFileSync(installed), fixture.binaryBytes);
+    assert.deepEqual(migrationTemporaryEntries(installed), []);
+  });
+});
+
+test("rejects and preserves an unknown concurrent migration winner", () => {
+  withFixture((fixture) => {
+    const installed = writeInstalledHelper(fixture, publishedPreviousBytes);
+    const unknownWinnerBytes = Buffer.from("unknown race winner");
+    let hookCalled = false;
+
+    assert.throws(
+      () => installMacOSCredentialHelper({
+        ...fixture,
+        beforePublish() {
+          hookCalled = true;
+          const winner = `${installed}.winner`;
+          writeFileSync(winner, unknownWinnerBytes, { mode: 0o700 });
+          renameSync(winner, installed);
+        },
+      }),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+
+    assert.equal(hookCalled, true);
+    assert.deepEqual(readFileSync(installed), unknownWinnerBytes);
+    assert.deepEqual(migrationTemporaryEntries(installed), []);
+  });
+});
+
+test("preserves the trusted predecessor when migration fails before publication", () => {
+  withFixture((fixture) => {
+    const installed = writeInstalledHelper(fixture, publishedPreviousBytes);
+    const previousIdentity = lstatSync(installed);
+    let hookCalled = false;
+
+    assert.throws(
+      () => installMacOSCredentialHelper({
+        ...fixture,
+        beforePublish() {
+          hookCalled = true;
+          throw new Error("synthetic pre-publication failure");
+        },
+      }),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+
+    assert.equal(hookCalled, true);
+    assert.equal(lstatSync(installed).ino, previousIdentity.ino);
+    assert.deepEqual(readFileSync(installed), publishedPreviousBytes);
+  });
+});
+
+test("removes its migration temporary after a pre-publication failure", () => {
+  withFixture((fixture) => {
+    const installed = writeInstalledHelper(fixture, publishedPreviousBytes);
+    let ownedTemporary;
+
+    assert.throws(
+      () => installMacOSCredentialHelper({
+        ...fixture,
+        randomId: () => "migration-cleanup",
+        beforePublish({ temporaryFile }) {
+          ownedTemporary = temporaryFile;
+          throw new Error("synthetic pre-publication failure");
+        },
+      }),
+      (error) => error instanceof MacOSCredentialError && error.code === "helper_missing_or_invalid",
+    );
+
+    assert.equal(typeof ownedTemporary, "string");
+    assert.equal(existsSync(ownedTemporary), false);
+    assert.deepEqual(migrationTemporaryEntries(installed), []);
+    assert.deepEqual(readFileSync(installed), publishedPreviousBytes);
   });
 });
 
