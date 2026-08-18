@@ -13,6 +13,43 @@ final class CredentialDialog: NSObject, CredentialPrompting {
 }
 
 @MainActor
+private final class CredentialDialogMainMenu {
+    private let application: NSApplication
+    private let previousMainMenu: NSMenu?
+
+    private init(application: NSApplication, previousMainMenu: NSMenu?) {
+        self.application = application
+        self.previousMainMenu = previousMainMenu
+    }
+
+    static func install(on application: NSApplication) -> CredentialDialogMainMenu {
+        let previousMainMenu = application.mainMenu
+        let mainMenu = NSMenu()
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        let pasteItem = NSMenuItem(
+            title: "Paste",
+            action: #selector(NSText.paste(_:)),
+            keyEquivalent: "v"
+        )
+        pasteItem.keyEquivalentModifierMask = .command
+        pasteItem.target = nil
+        editMenu.addItem(pasteItem)
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+        application.mainMenu = mainMenu
+        return CredentialDialogMainMenu(
+            application: application,
+            previousMainMenu: previousMainMenu
+        )
+    }
+
+    func restore() {
+        application.mainMenu = previousMainMenu
+    }
+}
+
+@MainActor
 private final class CredentialDialogController: NSObject, NSWindowDelegate {
     private let accessKeyField = NSSecureTextField()
     private let secretKeyField = NSSecureTextField()
@@ -21,12 +58,15 @@ private final class CredentialDialogController: NSObject, NSWindowDelegate {
 
     func run() -> CredentialPromptResult {
         let window = makeWindow()
-        NSApplication.shared.setActivationPolicy(.accessory)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        let application = NSApplication.shared
+        application.setActivationPolicy(.accessory)
+        let installedMenu = CredentialDialogMainMenu.install(on: application)
+        defer { installedMenu.restore() }
+        application.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(accessKeyField)
-        NSApplication.shared.runModal(for: window)
+        application.runModal(for: window)
         window.orderOut(nil)
         return result
     }

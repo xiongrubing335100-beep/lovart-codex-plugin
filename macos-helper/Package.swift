@@ -22,5 +22,9 @@ let package = Package(
             name: "LovartCredentialCoreTests",
             dependencies: ["LovartCredentialCore"]
         ),
+        .testTarget(
+            name: "LovartCredentialHelperTests",
+            dependencies: ["LovartCredentialHelper"]
+        ),
     ]
 )
