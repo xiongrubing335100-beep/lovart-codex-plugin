@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -20,7 +20,7 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
     command: process.execPath,
     args: [
       "--import",
-      path.join(projectRoot, "fixtures", "macos-helper-not-configured.mjs"),
+      pathToFileURL(path.join(projectRoot, "fixtures", "macos-helper-not-configured.mjs")).href,
       path.join(projectRoot, "src", "index.js"),
     ],
     cwd: projectRoot,

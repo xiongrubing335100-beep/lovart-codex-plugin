@@ -1,4 +1,4 @@
-import test from "node:test";
+import nodeTest from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -27,6 +27,8 @@ import {
   installMacOSCredentialHelper,
   readMacOSCredentials,
 } from "../src/macos-credential-helper.js";
+
+const test = process.platform === "darwin" ? nodeTest : nodeTest.skip;
 
 const publishedPreviousHash = "f254b328a2c1fbf4665c3733173539b3620e88a0f047d8fc52bc17f9e6531b25";
 const publishedPreviousBytes = gunzipSync(readFileSync(

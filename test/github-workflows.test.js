@@ -8,6 +8,7 @@ import test from "node:test";
 
 function workflow(name) {
   return readFileSync(`.github/workflows/${name}.yml`, "utf8")
+    .replace(/\r\n/g, "\n")
     .replace(/^\s*#.*$/gm, "");
 }
 
