@@ -1,0 +1,236 @@
+name: Publish desktop release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+jobs:
+  build:
+    name: ${{ matrix.platform }} archive
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos
+          - os: windows-2022
+            platform: windows
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Node dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Scan release inputs and verify the generated plugin build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/release_package.py scan
+          npm run build:plugin
+          git diff --exit-code -- plugin-build/lovart
+      - name: Run Node tests
+        run: npm test
+      - name: Run Python release-package tests
+        run: python -m unittest discover -s test -p '*_test.py' -v
+      - name: Run Python Agent Skill test
+        run: python test/agent_skill.test.py -v
+      - name: Verify the macOS credential helper
+        if: matrix.platform == 'macos'
+        run: node scripts/verify-macos-credential-helper.mjs
+      - name: Parse the Windows credential setup script without running it
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          [scriptblock]::Create((Get-Content -LiteralPath 'scripts/configure-lovart-credentials.ps1' -Raw)) | Out-Null
+      - name: Validate the tag version and build one platform archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          [[ "$tag_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$tag_version" == "$package_version" ]]
+          mkdir -p dist/release
+          python scripts/release_package.py build --platform "${{ matrix.platform }}" --version "$tag_version" --output-dir dist/release --dependency-source node_modules
+      - name: Safely verify and extract the release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          archive="$(find dist/release -maxdepth 1 -name '*.zip' -type f -print -quit)"
+          test -n "$archive"
+          python - "$archive" "${{ matrix.platform }}" "$tag_version" <<'PY'
+          from pathlib import Path
+          from scripts.release_package import verify_release
+          import sys
+          verify_release(Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path.cwd())
+          PY
+          python -m zipfile -e "$archive" dist/extracted
+          LOVART_RELEASE_EXTRACTED_ROOT="$PWD/dist/extracted/lovart-codex-plugin" node --test --test-isolation=none test/release-mcp-smoke.test.js
+      - name: Upload immutable platform release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: lovart-release-${{ matrix.platform }}
+          path: |
+            dist/release/*.zip
+            dist/release/*.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download both platform release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: lovart-release-*
+          path: dist/release
+          merge-multiple: true
+      - name: Publish the four verified release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tag_version="${GITHUB_REF_NAME#v}"
+          [[ "$tag_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          macos_archive="lovart-codex-plugin-v${tag_version}-macos-universal.zip"
+          macos_sidecar="${macos_archive}.sha256"
+          windows_archive="lovart-codex-plugin-v${tag_version}-windows.zip"
+          windows_sidecar="${windows_archive}.sha256"
+          expected_names=("$macos_archive" "$macos_sidecar" "$windows_archive" "$windows_sidecar")
+          expected_paths=("${expected_names[@]/#/dist/release/}")
+
+          require_exact_asset_names() {
+            local directory="$1"
+            local actual_file expected_file
+            local -a actual_names=()
+            while IFS= read -r actual_file; do
+              actual_names+=("$actual_file")
+            done < <(find "$directory" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+            [[ ${#actual_names[@]} -eq ${#expected_names[@]} ]]
+            for expected_file in "${expected_names[@]}"; do
+              [[ -f "$directory/$expected_file" && ! -L "$directory/$expected_file" ]]
+            done
+            diff -u \
+              <(printf '%s\n' "${expected_names[@]}" | LC_ALL=C sort) \
+              <(printf '%s\n' "${actual_names[@]}")
+          }
+
+          check_release_checksums() {
+            local directory="$1"
+            (
+              cd "$directory"
+              sha256sum --strict --check "$macos_sidecar"
+              sha256sum --strict --check "$windows_sidecar"
+            )
+          }
+
+          verify_existing_release() {
+            local existing_dir
+            existing_dir="$(mktemp -d)"
+            gh release download "$GITHUB_REF_NAME" --dir "$existing_dir"
+            require_exact_asset_names "$existing_dir"
+            check_release_checksums "$existing_dir"
+            for asset in "${expected_names[@]}"; do
+              cmp -- "dist/release/$asset" "$existing_dir/$asset"
+            done
+          }
+
+          verify_existing_asset() {
+            local asset="$1"
+            local existing_dir
+            existing_dir="$(mktemp -d)"
+            gh release download "$GITHUB_REF_NAME" --pattern "$asset" --dir "$existing_dir"
+            [[ -f "$existing_dir/$asset" && ! -L "$existing_dir/$asset" ]]
+            cmp -- "dist/release/$asset" "$existing_dir/$asset"
+          }
+
+          assert_remote_tag_sha() {
+            local remote_tag_sha
+            remote_tag_sha="$(gh api "repos/$GH_REPO/commits/$GITHUB_REF_NAME" --jq '.sha')"
+            [[ "$remote_tag_sha" == "$GITHUB_SHA" ]]
+          }
+
+          require_exact_asset_names dist/release
+          check_release_checksums dist/release
+
+          release_error="$(mktemp)"
+          if release_json="$(gh release view "$GITHUB_REF_NAME" --json isDraft,assets 2>"$release_error")"; then
+            is_draft="$(printf '%s' "$release_json" | jq -r '.isDraft')"
+            if [[ "$is_draft" == false ]]; then
+              verify_existing_release
+              assert_remote_tag_sha
+              exit 0
+            fi
+            [[ "$is_draft" == true ]]
+            if ! existing_names_output="$(printf '%s' "$release_json" | jq -r '.assets[].name')"; then
+              echo "failed to read draft release asset names" >&2
+              exit 1
+            fi
+            existing_names=("")
+            if [[ -n "$existing_names_output" ]]; then
+              while IFS= read -r existing_name; do
+                [[ -n "$existing_name" ]]
+                for known_name in "${existing_names[@]}"; do
+                  [[ -z "$known_name" || "$known_name" != "$existing_name" ]] || {
+                    echo "duplicate draft release asset: $existing_name" >&2
+                    exit 1
+                  }
+                done
+                case "$existing_name" in
+                  "$macos_archive"|"$macos_sidecar"|"$windows_archive"|"$windows_sidecar") ;;
+                  *) echo "unexpected draft release asset: $existing_name" >&2; exit 1 ;;
+                esac
+                verify_existing_asset "$existing_name"
+                existing_names+=("$existing_name")
+              done <<< "$existing_names_output"
+            fi
+            missing_paths=("")
+            for asset in "${expected_names[@]}"; do
+              present=false
+              for existing_name in "${existing_names[@]}"; do
+                [[ -z "$existing_name" || "$existing_name" != "$asset" ]] || present=true
+              done
+              [[ "$present" == true ]] || missing_paths+=("dist/release/$asset")
+            done
+            if [[ ${#missing_paths[@]} -gt 1 ]]; then
+              assert_remote_tag_sha
+              gh release upload "$GITHUB_REF_NAME" "${missing_paths[@]:1}"
+            fi
+            verify_existing_release
+            assert_remote_tag_sha
+            gh release edit "$GITHUB_REF_NAME" --draft=false --verify-tag
+            verify_existing_release
+          elif grep -qi 'release not found' "$release_error"; then
+            assert_remote_tag_sha
+            gh release create "$GITHUB_REF_NAME" "${expected_paths[@]}" \
+              --draft \
+              --verify-tag \
+              --title "Lovart Codex Plugin $GITHUB_REF_NAME" \
+              --generate-notes
+            verify_existing_release
+            assert_remote_tag_sha
+            gh release edit "$GITHUB_REF_NAME" --draft=false --verify-tag
+            verify_existing_release
+          else
+            cat "$release_error" >&2
+            exit 1
+          fi

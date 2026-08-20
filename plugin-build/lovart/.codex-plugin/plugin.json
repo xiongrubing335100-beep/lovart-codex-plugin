@@ -1,12 +1,12 @@
 {
   "name": "lovart",
-  "version": "0.1.0+codex.20260818.localkeychain5",
+  "version": "0.2.0",
   "description": "Generate and edit images, videos, audio, and 3D assets with Lovart directly from Codex.",
   "author": {
     "name": "Amoiz"
   },
   "homepage": "https://www.lovart.ai/",
-  "repository": "https://github.com/lovartai/lovart-skill",
+  "repository": "https://github.com/xiongrubing335100-beep/lovart-codex-plugin",
   "license": "MIT",
   "keywords": [
     "lovart",

@@ -266,6 +266,30 @@ test("resolvePython prefers Codex's bundled Python on Windows", () => {
   );
 });
 
+test("resolvePython prefers Codex's bundled Python on macOS", () => {
+  const candidate = path.join(
+    "/Users/test",
+    ".cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+  );
+  assert.equal(
+    resolvePython(
+      { HOME: "/Users/test" },
+      { platform: "darwin", fileExists: (value) => value === candidate },
+    ),
+    candidate,
+  );
+});
+
+test("resolvePython falls back to python3 when the macOS bundle is absent", () => {
+  assert.equal(
+    resolvePython(
+      { HOME: "/Users/test" },
+      { platform: "darwin", fileExists: () => false },
+    ),
+    "python3",
+  );
+});
+
 test("resolvePython falls back to the platform launcher", () => {
   assert.equal(
     resolvePython(

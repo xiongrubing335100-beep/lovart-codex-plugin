@@ -11,3 +11,4 @@ __pycache__/
 *.log
 .worktrees/
 macos-helper/.build/
+dist/release/

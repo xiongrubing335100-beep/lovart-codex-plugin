@@ -22,29 +22,24 @@ export const defaultScriptPath = path.join(
 
 export const defaultOutputDir = path.join(projectRoot, "downloads");
 
+export function codexBundledPythonPath(env, platform) {
+  if (platform === "win32" && env.USERPROFILE) {
+    return path.join(env.USERPROFILE, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "python", "python.exe");
+  }
+  if (platform === "darwin" && env.HOME) {
+    return path.join(env.HOME, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "python", "bin", "python3");
+  }
+  return undefined;
+}
+
 export function resolvePython(
   env = process.env,
   { platform = process.platform, fileExists = existsSync } = {},
 ) {
   if (env.LOVART_PYTHON) return env.LOVART_PYTHON;
-
-  if (platform === "win32") {
-    if (env.USERPROFILE) {
-      const bundledPython = path.join(
-        env.USERPROFILE,
-        ".cache",
-        "codex-runtimes",
-        "codex-primary-runtime",
-        "dependencies",
-        "python",
-        "python.exe",
-      );
-      if (fileExists(bundledPython)) return bundledPython;
-    }
-    return "py";
-  }
-
-  return "python3";
+  const bundled = codexBundledPythonPath(env, platform);
+  if (bundled && fileExists(bundled)) return bundled;
+  return platform === "win32" ? "py" : "python3";
 }
 
 export function readWindowsUserVariable(name) {

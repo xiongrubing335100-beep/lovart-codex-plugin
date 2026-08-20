@@ -1,0 +1,17 @@
+{
+  "name": "lovart-codex",
+  "plugins": [
+    {
+      "name": "lovart",
+      "source": {
+        "source": "local",
+        "path": "./plugin-build/lovart"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Creativity"
+    }
+  ]
+}

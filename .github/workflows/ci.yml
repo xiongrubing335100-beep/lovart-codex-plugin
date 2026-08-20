@@ -1,0 +1,73 @@
+name: Desktop CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos
+          - os: windows-2022
+            platform: windows
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install Node dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Scan release inputs and verify the generated plugin build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/release_package.py scan
+          npm run build:plugin
+          git diff --exit-code -- plugin-build/lovart
+      - name: Run Node tests
+        run: npm test
+      - name: Run Python release-package tests
+        run: python -m unittest discover -s test -p '*_test.py' -v
+      - name: Run Python Agent Skill test
+        run: python test/agent_skill.test.py -v
+      - name: Verify the macOS credential helper
+        if: matrix.platform == 'macos'
+        run: node scripts/verify-macos-credential-helper.mjs
+      - name: Parse the Windows credential setup script without running it
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          [scriptblock]::Create((Get-Content -LiteralPath 'scripts/configure-lovart-credentials.ps1' -Raw)) | Out-Null
+      - name: Build, safely verify, and extract the platform archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          RELEASE_DIR="$RUNNER_TEMP/lovart-release/${{ matrix.platform }}"
+          ARCHIVE="$RELEASE_DIR/lovart-codex-plugin-v${VERSION}-${{ matrix.platform == 'macos' && 'macos-universal' || 'windows' }}.zip"
+          EXTRACT_DIR="$RELEASE_DIR/extracted"
+          mkdir -p "$RELEASE_DIR"
+          python scripts/release_package.py build --platform "${{ matrix.platform }}" --version "$VERSION" --output-dir "$RELEASE_DIR" --dependency-source node_modules
+          python - "$ARCHIVE" "${{ matrix.platform }}" "$VERSION" <<'PY'
+          from pathlib import Path
+          from scripts.release_package import verify_release
+          import sys
+          verify_release(Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path.cwd())
+          PY
+          python -m zipfile -e "$ARCHIVE" "$EXTRACT_DIR"
+          LOVART_RELEASE_EXTRACTED_ROOT="$EXTRACT_DIR/lovart-codex-plugin" node --test --test-isolation=none test/release-mcp-smoke.test.js

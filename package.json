@@ -1,11 +1,14 @@
 {
   "name": "lovart-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "MCP adapter for the official Lovart Agent Skill",
   "scripts": {
     "start": "node src/index.js",
+    "build:plugin": "node scripts/sync-plugin-build.mjs",
+    "release:macos": "python3 scripts/release_package.py build --platform macos --version 0.2.0 --output-dir dist/release",
+    "release:windows": "python3 scripts/release_package.py build --platform windows --version 0.2.0 --output-dir dist/release",
     "test": "node --test --test-isolation=none"
   },
   "dependencies": {

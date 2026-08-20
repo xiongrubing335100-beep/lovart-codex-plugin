@@ -13,7 +13,7 @@ import {
   runLovart,
 } from "./lovart-cli.js";
 
-const server = new McpServer({ name: "lovart-mcp", version: "0.1.0" });
+const server = new McpServer({ name: "lovart-mcp", version: "0.2.0" });
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function response(data) {

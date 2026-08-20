@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,13 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
 
   try {
     await client.connect(transport);
+    const packageVersion = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")).version;
+    const pluginRoot = path.join(projectRoot, "plugin-build", "lovart");
+    const pluginVersion = JSON.parse(readFileSync(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")).version;
+    const pluginPackageVersion = JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
+    assert.equal(client.getServerVersion()?.version, packageVersion);
+    assert.equal(pluginVersion, packageVersion);
+    assert.equal(pluginPackageVersion, packageVersion);
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name);
 
