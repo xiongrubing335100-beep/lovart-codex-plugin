@@ -637,6 +637,13 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn(b"\r\n", marketplace)
         self.assertTrue(marketplace.endswith(b"\n"))
 
+    def test_windows_host_exec_checks_do_not_change_archive_modes(self):
+        with mock.patch.object(release_package.os, "access", return_value=True):
+            archive = build_fixture_release("windows", self.root, self.output)
+        with zipfile.ZipFile(archive) as package:
+            marketplace = package.getinfo("lovart-codex-plugin/.agents/plugins/marketplace.json")
+        self.assertEqual((marketplace.external_attr >> 16) & 0o777, 0o644)
+
     def test_second_publication_rename_failure_leaves_no_orphaned_archive(self):
         original_replace = os.replace
 

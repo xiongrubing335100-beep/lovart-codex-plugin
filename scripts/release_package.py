@@ -359,12 +359,16 @@ def _archive_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _portable_archive_mode(path: Path) -> int:
+    return 0o755 if stat.S_IMODE(path.stat().st_mode) & 0o111 else 0o644
+
+
 def write_deterministic_zip(source: Path, archive: Path) -> None:
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
         for path in sorted(candidate for candidate in source.rglob("*") if candidate.is_file()):
             info = zipfile.ZipInfo(path.relative_to(source.parent).as_posix(), FIXED_ZIP_TIME)
             info.create_system = 3
-            info.external_attr = (stat.S_IFREG | (0o755 if os.access(path, os.X_OK) else 0o644)) << 16
+            info.external_attr = (stat.S_IFREG | _portable_archive_mode(path)) << 16
             output.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
 
@@ -463,7 +467,7 @@ def _trusted_runtime_files(repository_root: Path, platform: str) -> dict[str, tu
         candidates = [source] if source.is_file() else sorted(path for path in source.rglob("*") if path.is_file())
         for candidate in candidates:
             name = prefix + "plugins/lovart/" + candidate.relative_to(plugin_source).as_posix()
-            files[name] = (candidate.read_bytes(), 0o755 if os.access(candidate, os.X_OK) else 0o644)
+            files[name] = (candidate.read_bytes(), _portable_archive_mode(candidate))
     return files
 
 
