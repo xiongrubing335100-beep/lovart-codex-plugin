@@ -206,7 +206,7 @@ def _rewrite_marketplace(source: Path, destination: Path) -> None:
     except (KeyError, StopIteration, TypeError, json.JSONDecodeError) as error:
         raise ReleaseError("invalid Lovart marketplace manifest") from error
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
+    destination.write_bytes((json.dumps(marketplace, indent=2) + "\n").encode("utf-8"))
 
 
 def _path_is_within(path: Path, root: Path) -> bool:

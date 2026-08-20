@@ -622,6 +622,21 @@ class ReleasePackageTests(unittest.TestCase):
             ("{}  {}\n".format(sha256(archive), archive.name)).encode("ascii"),
         )
 
+    def test_windows_marketplace_bytes_keep_a_single_lf(self):
+        original_write_text = Path.write_text
+
+        def write_windows_text(path, data, encoding=None, errors=None):
+            if path.name == "marketplace.json":
+                return path.write_bytes(data.replace("\n", "\r\n").encode(encoding or "utf-8"))
+            return original_write_text(path, data, encoding=encoding, errors=errors)
+
+        with mock.patch.object(Path, "write_text", new=write_windows_text):
+            archive = build_fixture_release("windows", self.root, self.output)
+        with zipfile.ZipFile(archive) as package:
+            marketplace = package.read("lovart-codex-plugin/.agents/plugins/marketplace.json")
+        self.assertNotIn(b"\r\n", marketplace)
+        self.assertTrue(marketplace.endswith(b"\n"))
+
     def test_second_publication_rename_failure_leaves_no_orphaned_archive(self):
         original_replace = os.replace
 
