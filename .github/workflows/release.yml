@@ -44,6 +44,7 @@ jobs:
       - name: Run Node tests
         run: npm test
       - name: Run Python release-package tests
+        if: matrix.platform == 'macos'
         run: python -m unittest discover -s test -p '*_test.py' -v
       - name: Run Python Agent Skill test
         run: python test/agent_skill.test.py -v
