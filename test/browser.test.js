@@ -75,6 +75,11 @@ test('browser harness: actual bridge calls reach stdio, text is safe, remount re
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
     browser = await chromium.launch({ channel: 'chrome', headless: true });
     const page = await browser.newPage({ viewport: {width:768,height:960} });
+    page.setDefaultTimeout(15000);
+    // A hosted Windows runner has no interactive desktop. Model an active host
+    // page so Chrome does not suppress the card's visibility-gated size reports.
+    const browserSession = await page.context().newCDPSession(page);
+    await browserSession.send('Emulation.setFocusEmulationEnabled', {enabled:true});
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const frame = page.frameLocator('iframe');
     await frame.locator('#bump:not([disabled])').waitFor();
@@ -82,7 +87,15 @@ test('browser harness: actual bridge calls reach stdio, text is safe, remount re
     assert.equal(await frame.locator('body').evaluate(()=>window.INJECTED), undefined);
     assert.equal(await frame.locator('#media').evaluate(img=>img.naturalWidth),1080);
     // Size notifications are asynchronous and can arrive after the first render.
-    await page.waitForFunction(()=>Array.isArray(window.cardSizes)&&window.cardSizes.length>0);
+    await page.waitForFunction(()=>Array.isArray(window.cardSizes)&&window.cardSizes.length>0, null, {polling:100}).catch(async error=>{
+      const state=await frame.locator('body').evaluate(()=>({
+        visibility:document.visibilityState,
+        card:document.querySelector('#image-card').getBoundingClientRect().toJSON(),
+        previewHidden:document.querySelector('#preview').hidden,
+        connection:document.querySelector('#connection-text').textContent,
+      }));
+      throw new Error(`Initial card size was not reported: ${JSON.stringify(state)}`, {cause:error});
+    });
     // Native previews temporarily hide the conversation. Never persist a zero-size card.
     await page.evaluate(async()=>{
       const frame=document.querySelector('iframe');frame.style.display='none';
