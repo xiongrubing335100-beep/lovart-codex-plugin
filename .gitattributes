@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png -text
+*.gz -text
+bin/macos/lovart-credential-helper -text
+plugin-build/lovart/bin/macos/lovart-credential-helper -text
+dist/*.mjs -whitespace
+plugin-build/lovart/dist/*.mjs -whitespace

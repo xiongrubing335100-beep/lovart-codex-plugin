@@ -721,6 +721,7 @@ def main():
 
     # confirm (confirms, polls until done, returns result)
     p = sub.add_parser("confirm")
+    p.add_argument("--exclude-urls", nargs="*", default=[], help="Previous artifacts excluded from this operation")
     p.add_argument("--thread-id", required=True, help="Thread with pending high-cost operation")
     p.add_argument("--json", action="store_true")
     p.add_argument("--download", action="store_true", help="Download artifacts after completion")
@@ -740,6 +741,7 @@ def main():
 
     # result
     p = sub.add_parser("result")
+    p.add_argument("--exclude-urls", nargs="*", default=[], help="Previous artifacts excluded from this operation")
     p.add_argument("--thread-id", required=True)
     p.add_argument("--json", action="store_true")
     p.add_argument("--download", action="store_true", help="Download artifacts to local files")
@@ -1006,7 +1008,7 @@ def main():
             result = skill.get_result(args.thread_id)
             result["final_status"] = status
             if args.download:
-                dl = skill.download_artifacts(result, output_dir=args.output_dir)
+                dl = skill.download_artifacts(result, output_dir=args.output_dir, exclude_urls=set(args.exclude_urls))
                 result["downloaded"] = dl
             if args.json:
                 print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -1057,7 +1059,7 @@ def main():
         elif args.command == "result":
             r = skill.get_result(args.thread_id)
             if args.download:
-                dl = skill.download_artifacts(r, output_dir=args.output_dir)
+                dl = skill.download_artifacts(r, output_dir=args.output_dir, exclude_urls=set(args.exclude_urls))
                 r["downloaded"] = dl
             print(json.dumps(r, indent=2, ensure_ascii=False))
 

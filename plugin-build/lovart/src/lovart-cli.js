@@ -3,11 +3,9 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  installMacOSCredentialHelper,
-  MacOSCredentialError,
-  readMacOSCredentials,
-} from "./macos-credential-helper.js";
+import { mediaOutputDir } from "./paths.js";
+import { agentRequest } from './generation-input.js';
+import {readMacCredentials,validateCredentials} from './credential-store.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, "..");
@@ -20,16 +18,11 @@ export const defaultScriptPath = path.join(
   "agent_skill.py",
 );
 
-export const defaultOutputDir = path.join(projectRoot, "downloads");
+export const defaultOutputDir = mediaOutputDir;
 
-export function codexBundledPythonPath(env, platform) {
-  if (platform === "win32" && env.USERPROFILE) {
-    return path.join(env.USERPROFILE, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "python", "python.exe");
-  }
-  if (platform === "darwin" && env.HOME) {
-    return path.join(env.HOME, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "python", "bin", "python3");
-  }
-  return undefined;
+export function codexBundledPythonPath(env,platform) {
+  if(platform==='win32'&&env.USERPROFILE)return path.join(env.USERPROFILE,'.cache','codex-runtimes','codex-primary-runtime','dependencies','python','python.exe');
+  if(platform==='darwin'&&env.HOME)return path.join(env.HOME,'.cache','codex-runtimes','codex-primary-runtime','dependencies','python','bin','python3');
 }
 
 export function resolvePython(
@@ -37,9 +30,9 @@ export function resolvePython(
   { platform = process.platform, fileExists = existsSync } = {},
 ) {
   if (env.LOVART_PYTHON) return env.LOVART_PYTHON;
-  const bundled = codexBundledPythonPath(env, platform);
-  if (bundled && fileExists(bundled)) return bundled;
-  return platform === "win32" ? "py" : "python3";
+  const bundled=codexBundledPythonPath(env,platform);
+  if(bundled&&fileExists(bundled))return bundled;
+  return platform==='win32'?'py':'python3';
 }
 
 export function readWindowsUserVariable(name) {
@@ -59,41 +52,23 @@ export function readWindowsUserVariable(name) {
 
 export function resolveLovartEnv(
   env = process.env,
-  {
-    platform = process.platform,
-    readUserVariable = readWindowsUserVariable,
-    installMacCredentialHelper = installMacOSCredentialHelper,
-    invokeMacCredentialHelper = readMacOSCredentials,
-    readMacCredentials,
-  } = {},
+  { platform = process.platform, readUserVariable = readWindowsUserVariable, readMac = readMacCredentials } = {},
 ) {
   const resolved = { ...env };
-  if (platform === "darwin") {
-    const credentials = readMacCredentials
-      ? readMacCredentials()
-      : invokeMacCredentialHelper({
-        helperPath: installMacCredentialHelper({ projectRoot }),
-      });
-    const accessKey = credentials?.accessKey;
-    const secretKey = credentials?.secretKey;
-    if (
-      typeof accessKey !== "string" ||
-      typeof secretKey !== "string" ||
-      !accessKey.trim() ||
-      !secretKey.trim()
-    ) {
-      throw new MacOSCredentialError("invalid_payload");
+  if(platform==='darwin') {
+    const saved=readMac();
+    if(saved) {
+      const keys=validateCredentials(saved);
+      resolved.LOVART_ACCESS_KEY=keys.access_key;
+      resolved.LOVART_SECRET_KEY=keys.secret_key;
     }
-    resolved.LOVART_ACCESS_KEY = accessKey;
-    resolved.LOVART_SECRET_KEY = secretKey;
     return resolved;
   }
+  if (platform !== "win32") return resolved;
 
-  if (platform === "win32") {
-    for (const name of ["LOVART_ACCESS_KEY", "LOVART_SECRET_KEY"]) {
-      const value = readUserVariable(name);
-      if (value) resolved[name] = value;
-    }
+  for (const name of ["LOVART_ACCESS_KEY", "LOVART_SECRET_KEY"]) {
+    const currentUserValue = readUserVariable(name);
+    if (currentUserValue) resolved[name] = currentUserValue;
   }
   return resolved;
 }
@@ -124,33 +99,17 @@ export async function runLovart(
     scriptPath = process.env.LOVART_SKILL_SCRIPT || defaultScriptPath,
     outputDir = process.env.LOVART_OUTPUT_DIR || defaultOutputDir,
     env = process.env,
-    platform = process.platform,
-    installMacCredentialHelper,
-    invokeMacCredentialHelper,
-    readMacCredentials,
-    spawnProcess = spawn,
   } = {},
 ) {
   await mkdir(outputDir, { recursive: true });
   const pythonCommand = python || resolvePython(env);
 
   return new Promise((resolve, reject) => {
-    let childEnv = resolveLovartChildEnv(env, {
-      platform,
-      installMacCredentialHelper,
-      invokeMacCredentialHelper,
-      readMacCredentials,
+    const child = spawn(pythonCommand, [scriptPath, ...args], {
+      env: resolveLovartChildEnv(env),
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    let child;
-    try {
-      child = spawnProcess(pythonCommand, [scriptPath, ...args], {
-        env: childEnv,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } finally {
-      childEnv = undefined;
-    }
 
     let stdout = "";
     let stderr = "";
@@ -176,7 +135,7 @@ export async function runLovart(
 }
 
 export function generationArgs(input, outputDir = defaultOutputDir) {
-  const args = ["chat", "--prompt", input.prompt, "--json", "--download", "--output-dir", outputDir];
+  const args = ["chat", "--prompt", agentRequest(input), "--json", "--download", "--output-dir", outputDir];
 
   if (input.project_id) args.push("--project-id", input.project_id);
   if (input.thread_id) args.push("--thread-id", input.thread_id);

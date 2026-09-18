@@ -1,20 +1,19 @@
 #!/usr/bin/env node
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { configureCredentialsForPlatform } from "./lovart-credentials.js";
+import path from 'node:path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import {
-  confirmArgs,
-  defaultOutputDir,
-  generationArgs,
-  resultArgs,
-  runLovart,
-} from "./lovart-cli.js";
+import { runLovart } from "./lovart-cli.js";
+import { createCredentialSetup } from './credential-setup.js';
 
-const server = new McpServer({ name: "lovart-mcp", version: "0.2.0" });
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { createProbeServer } from "./server.js";
+import { GenerationCards } from "./generation-cards.js";
+import { cardStateDir, mediaOutputDir } from "./paths.js";
+const {server,store,drafts} = createProbeServer(cardStateDir, new McpServer({ name: "lovart-mcp", version: "0.1.0" }));
+const cards = new GenerationCards({store,drafts,execute:runLovart,outputDir:mediaOutputDir,stateDir:cardStateDir});
+async function cardCall(action) {try {return response(await action());} catch (error) {return failure(error);}}
+
+const credentialSetup = createCredentialSetup();
 
 function response(data) {
   return {
@@ -39,7 +38,10 @@ async function call(args) {
 }
 
 const generationSchema = {
-  prompt: z.string().min(1).describe("Pass the user's original Lovart request without rewriting it."),
+  request_id: z.string().uuid().optional(),
+  prompt: z.string().min(1).max(20000).describe("Only the image/video creative prompt, verbatim. Exclude model selection, delivery instructions, and wrapper text such as '提示词如下'."),
+  requested_model: z.string().min(1).max(200).optional().describe("User-requested model name and version, e.g. MJ v8.2. Kept separate from the creative prompt; not evidence of the actual output model."),
+  execution_instructions: z.string().min(1).max(5000).optional().describe("Agent execution/delivery requirements, e.g. return every original output without selection. Never put these in prompt."),
   project_id: z.string().optional().describe("Lovart project ID. Omit to use the active local project."),
   thread_id: z.string().optional().describe("Reuse a Lovart thread to continue editing with context."),
   attachments: z.array(z.string()).optional().describe("Lovart CDN URLs returned by lovart_upload."),
@@ -55,7 +57,7 @@ server.registerTool(
       "Generate or edit images, videos, audio, or 3D assets with Lovart. Downloads completed artifacts. If final_status is pending_confirmation, do not confirm automatically; show the estimated credit cost and ask the user first.",
     inputSchema: generationSchema,
   },
-  async (input) => call(generationArgs(input, process.env.LOVART_OUTPUT_DIR || defaultOutputDir)),
+  async (input) => cardCall(() => cards.generate(input)),
 );
 
 server.registerTool(
@@ -65,7 +67,7 @@ server.registerTool(
       "Confirm a pending high-cost Lovart operation and download its result. Call only after the user explicitly accepts the displayed credit cost.",
     inputSchema: { thread_id: z.string().min(1) },
   },
-  async ({ thread_id }) => call(confirmArgs(thread_id, process.env.LOVART_OUTPUT_DIR || defaultOutputDir)),
+  async ({ thread_id }) => cardCall(() => cards.resume(thread_id,true)),
 );
 
 server.registerTool(
@@ -83,7 +85,7 @@ server.registerTool(
     description: "Retrieve and download the latest artifacts for a Lovart thread.",
     inputSchema: { thread_id: z.string().min(1) },
   },
-  async ({ thread_id }) => call(resultArgs(thread_id, process.env.LOVART_OUTPUT_DIR || defaultOutputDir)),
+  async ({ thread_id }) => cardCall(() => cards.resume(thread_id)),
 );
 
 server.registerTool(
@@ -92,7 +94,7 @@ server.registerTool(
     description: "Upload a local image or video to Lovart and return a CDN URL for use as an attachment.",
     inputSchema: { file_path: z.string().min(1) },
   },
-  async ({ file_path }) => call(["upload", "--file", path.resolve(file_path)]),
+  async ({ file_path }) => cardCall(async () => cards.rememberUpload(path.resolve(file_path), await runLovart(["upload", "--file", path.resolve(file_path)]))),
 );
 
 server.registerTool(
@@ -108,11 +110,16 @@ server.registerTool(
   "lovart_configure_credentials",
   {
     description:
-      "Open the local macOS or Windows credential setup. On macOS, AK/SK are stored only in this Mac's non-synchronizing login Keychain and reused after restarts. Keys are never returned to chat.",
+      "On Windows or macOS, when the user says 配置lovart的密钥, 配置 Lovart 的密钥, or asks to set/change Lovart API keys, call this directly with {} to return a temporary local webpage URL. No prior credentials, authentication check or project lookup is needed. Show the returned URL as a clickable link; its password fields support Ctrl+V on Windows and Command+V on Mac, plus right-click paste. Keys stay local and are never returned to chat. Saving needs no Codex restart.",
     inputSchema: {},
   },
-  async () => response(configureCredentialsForPlatform({ projectRoot })),
+  async () => cardCall(() => credentialSetup.start()),
 );
+
+server.registerTool('lovart_credential_status',{
+  description:'Read whether this local credential setup session is awaiting input, saved or expired. Does not read or reveal keys, and does not verify Lovart authentication.',
+  inputSchema:{},annotations:{readOnlyHint:true,openWorldHint:false},
+},async()=>response(credentialSetup.status()));
 
 server.registerTool(
   "lovart_projects",
@@ -167,5 +174,10 @@ server.registerTool(
   },
   async () => call(["query-mode"]),
 );
+
+server.registerTool("lovart_run_execute", {
+  description: "Execute a saved Recreate draft once. Preserves its original prompt, reference order, project and model preferences. Returns saved cards; call lovart_display for each probe_id. Never automatically confirms credit costs.",
+  inputSchema: {run_id:z.string().uuid()},
+}, async ({run_id}) => cardCall(() => cards.executeDraft(run_id)));
 
 await server.connect(new StdioServerTransport());

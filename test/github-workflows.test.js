@@ -5,6 +5,9 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+// The publisher runs on Ubuntu; its Bash mocks use POSIX paths and executables.
+// Keep the static workflow contract checks on Windows and execute these mocks on macOS CI.
+const publishTest=process.platform==='win32'?test.skip:test;
 
 function workflow(name) {
   return readFileSync(`.github/workflows/${name}.yml`, "utf8")
@@ -326,7 +329,7 @@ test("tag release builds independently named platform artifacts and publishes ex
   assert.doesNotMatch(publish, /actions\/checkout@|actions\/setup-(?:node|python)@|npm\s+(?:ci|test)|python\s+(?:-m|scripts\/)/);
 });
 
-test("publish script creates, verifies, and publishes an absent release", () => {
+publishTest("publish script creates, verifies, and publishes an absent release", () => {
   const simulation = runPublishSimulation({ state: "absent" });
   try {
     assert.equal(simulation.status, 0, simulation.stderr);
@@ -339,7 +342,7 @@ test("publish script creates, verifies, and publishes an absent release", () => 
   }
 });
 
-test("published matching release verifies its tag after remote bytes and performs no mutation", () => {
+publishTest("published matching release verifies its tag after remote bytes and performs no mutation", () => {
   const simulation = runPublishSimulation({ state: "published", remoteFiles: completeReleaseFiles() });
   try {
     assert.equal(simulation.status, 0, simulation.stderr);
@@ -350,7 +353,7 @@ test("published matching release verifies its tag after remote bytes and perform
   }
 });
 
-test("partial draft uploads only missing assets after matching existing bytes", () => {
+publishTest("partial draft uploads only missing assets after matching existing bytes", () => {
   const allFiles = completeReleaseFiles();
   const [macosArchive, macosSidecar] = releaseNames();
   const simulation = runPublishSimulation({
@@ -368,7 +371,7 @@ test("partial draft uploads only missing assets after matching existing bytes", 
   }
 });
 
-test("conflicting draft asset fails before every release mutation", () => {
+publishTest("conflicting draft asset fails before every release mutation", () => {
   const conflicting = completeReleaseFiles({ macos: "different macos archive" });
   const simulation = runPublishSimulation({ state: "draft", remoteFiles: conflicting });
   try {
@@ -379,7 +382,7 @@ test("conflicting draft asset fails before every release mutation", () => {
   }
 });
 
-test("draft with an extra asset fails before every release mutation", () => {
+publishTest("draft with an extra asset fails before every release mutation", () => {
   const simulation = runPublishSimulation({
     state: "draft",
     remoteFiles: { ...completeReleaseFiles(), "unexpected.txt": "not a release asset" },
@@ -392,7 +395,7 @@ test("draft with an extra asset fails before every release mutation", () => {
   }
 });
 
-test("draft with a duplicate asset name fails before every release mutation", () => {
+publishTest("draft with a duplicate asset name fails before every release mutation", () => {
   const [duplicate] = releaseNames();
   const simulation = runPublishSimulation({
     state: "draft",
@@ -407,7 +410,7 @@ test("draft with a duplicate asset name fails before every release mutation", ()
   }
 });
 
-test("moved tag fails before an absent release can be created", () => {
+publishTest("moved tag fails before an absent release can be created", () => {
   const simulation = runPublishSimulation({ state: "absent", tagSha: "moved-sha" });
   try {
     assert.notEqual(simulation.status, 0);
@@ -417,7 +420,7 @@ test("moved tag fails before an absent release can be created", () => {
   }
 });
 
-test("moved tag fails before a published release can no-op", () => {
+publishTest("moved tag fails before a published release can no-op", () => {
   const simulation = runPublishSimulation({
     state: "published",
     remoteFiles: completeReleaseFiles(),
@@ -431,7 +434,7 @@ test("moved tag fails before a published release can no-op", () => {
   }
 });
 
-test("moved tag fails before a partial draft upload", () => {
+publishTest("moved tag fails before a partial draft upload", () => {
   const files = completeReleaseFiles();
   const [macosArchive, macosSidecar] = releaseNames();
   const simulation = runPublishSimulation({
@@ -447,7 +450,7 @@ test("moved tag fails before a partial draft upload", () => {
   }
 });
 
-test("moved tag fails before a complete draft can publish", () => {
+publishTest("moved tag fails before a complete draft can publish", () => {
   const simulation = runPublishSimulation({
     state: "draft",
     remoteFiles: completeReleaseFiles(),
@@ -461,7 +464,7 @@ test("moved tag fails before a complete draft can publish", () => {
   }
 });
 
-test("unsupported asset JSON path fails before the draft can mutate", () => {
+publishTest("unsupported asset JSON path fails before the draft can mutate", () => {
   const files = completeReleaseFiles();
   const [macosArchive, macosSidecar] = releaseNames();
   const simulation = runPublishSimulation({
@@ -476,7 +479,7 @@ test("unsupported asset JSON path fails before the draft can mutate", () => {
   }
 });
 
-test("unsupported asset JSON path in an empty draft fails before every release mutation", () => {
+publishTest("unsupported asset JSON path in an empty draft fails before every release mutation", () => {
   const simulation = runPublishSimulation({
     state: "draft",
     publish: publishScript().replace(".assets[].name", ".bogus[].name"),
@@ -489,7 +492,7 @@ test("unsupported asset JSON path in an empty draft fails before every release m
   }
 });
 
-test("upload mock rejects a mutated attempt to overwrite an existing draft asset", () => {
+publishTest("upload mock rejects a mutated attempt to overwrite an existing draft asset", () => {
   const files = completeReleaseFiles();
   const [macosArchive, macosSidecar] = releaseNames();
   const simulation = runPublishSimulation({

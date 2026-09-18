@@ -1,15 +1,28 @@
 {
   "name": "lovart-codex-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Dedicated Lovart plugin for Codex",
   "scripts": {
-    "start": "node src/index.js",
-    "test": "node --test --test-isolation=none"
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/start-mcp.mjs",
+    "test": "node --test --test-isolation=none test/*.test.js",
+    "build:plugin": "npm run build && node scripts/sync-plugin-build.mjs",
+    "release:macos": "python3 scripts/release_package.py build --platform macos --version 0.3.0 --output-dir dist/release",
+    "release:windows": "python scripts/release_package.py build --platform windows --version 0.3.0 --output-dir dist/release"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.4",
-    "zod": "^3.25.76"
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "cbor-x": "1.6.6",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright-core": "1.58.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
   }
 }

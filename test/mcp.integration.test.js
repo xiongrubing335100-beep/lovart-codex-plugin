@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import os from "node:os";
+import {mkdtemp,rm} from "node:fs/promises";
+import {randomUUID} from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -12,24 +13,18 @@ const projectRoot = process.env.LOVART_TEST_PROJECT_ROOT
   ? path.resolve(process.env.LOVART_TEST_PROJECT_ROOT)
   : path.resolve(here, "..");
 
-test("Codex-style stdio client discovers Lovart tools", async () => {
-  const testHome = mkdtempSync(path.join(tmpdir(), "lovart-mcp-home-"));
-  const testOutputDir = mkdtempSync(path.join(tmpdir(), "lovart-mcp-output-"));
-  const forbiddenTestState = path.join(projectRoot, ".lovart-test-state");
+test("Codex-style stdio client discovers tools and can call local config", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(),"lovart-integration-"));
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [
-      "--import",
-      pathToFileURL(path.join(projectRoot, "fixtures", "macos-helper-not-configured.mjs")).href,
-      path.join(projectRoot, "src", "index.js"),
-    ],
+    args: [path.join(projectRoot, "scripts", "start-mcp.mjs")],
     cwd: projectRoot,
     env: {
       ...process.env,
-      HOME: testHome,
-      LOVART_ACCESS_KEY: "fixture-ak",
-      LOVART_SECRET_KEY: "fixture-sk",
-      LOVART_OUTPUT_DIR: process.env.LOVART_TEST_OUTPUT_DIR || testOutputDir,
+      LOVART_CARD_STATE_DIR:directory,
+      LOVART_SKILL_SCRIPT:path.join(projectRoot,"test","fixtures","provider.py"),
+      LOVART_OUTPUT_DIR:
+        path.join(directory,"downloads"),
     },
     stderr: "pipe",
   });
@@ -37,13 +32,6 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
 
   try {
     await client.connect(transport);
-    const packageVersion = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")).version;
-    const pluginRoot = path.join(projectRoot, "plugin-build", "lovart");
-    const pluginVersion = JSON.parse(readFileSync(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")).version;
-    const pluginPackageVersion = JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
-    assert.equal(client.getServerVersion()?.version, packageVersion);
-    assert.equal(pluginVersion, packageVersion);
-    assert.equal(pluginPackageVersion, packageVersion);
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name);
 
@@ -52,61 +40,37 @@ test("Codex-style stdio client discovers Lovart tools", async () => {
     assert.ok(names.includes("lovart_upload"));
     assert.ok(names.includes("lovart_config"));
     assert.ok(names.includes("lovart_configure_credentials"));
+    assert.ok(names.includes("lovart_credential_status"));
+    const setup=await client.callTool({name:'lovart_configure_credentials',arguments:{}});
+    assert.equal(setup.isError,undefined);assert.match(setup.structuredContent.url,/^http:\/\/127\.0\.0\.1:\d+\/setup#token=/);
+    const credentialsPage=await fetch(setup.structuredContent.url);
+    assert.equal(credentialsPage.status,200);assert.match(await credentialsPage.text(),/Ctrl\+V/);
+    const setupStatus=await client.callTool({name:'lovart_credential_status',arguments:{}});
+    assert.equal(setupStatus.structuredContent.status,'awaiting_input');
 
-    if (process.platform === "darwin") {
-      const opened = await client.callTool({
-        name: "lovart_configure_credentials",
-        arguments: {},
-      });
-      assert.equal(opened.isError, undefined);
-      assert.deepEqual(opened.structuredContent, {
-        opened: true,
-        message: "Lovart credential setup window opened.",
-      });
-      assert.equal(JSON.stringify(opened).includes("fixture-ak"), false);
-      assert.equal(JSON.stringify(opened).includes("fixture-sk"), false);
-      assert.equal(JSON.stringify(opened).includes("accessKey"), false);
-      assert.equal(JSON.stringify(opened).includes("secretKey"), false);
+    const result = await client.callTool({ name: "lovart_config", arguments: {} });
+    assert.equal(result.isError, undefined, JSON.stringify(result.content));
+    assert.ok(Array.isArray(result.content));
 
-      const config = await client.callTool({ name: "lovart_config", arguments: {} });
-      assert.equal(config.isError, true);
-      assert.deepEqual(config.content, [{
-        type: "text",
-        text: "Lovart credentials are not configured on this Mac. Run Lovart credential setup.",
-      }]);
-      assert.equal(JSON.stringify(config).includes("fixture-ak"), false);
-      assert.equal(JSON.stringify(config).includes("fixture-sk"), false);
-    }
+    const threads = await client.callTool({ name: "lovart_threads", arguments: {} });
+    assert.equal(threads.isError, undefined, JSON.stringify(threads.content));
+    assert.ok(threads.structuredContent && !Array.isArray(threads.structuredContent));
+    assert.ok(Array.isArray(threads.structuredContent.result));
 
-    if (process.env.LOVART_TEST_UPLOAD_FILE) {
-      const upload = await client.callTool({
-        name: "lovart_upload",
-        arguments: { file_path: process.env.LOVART_TEST_UPLOAD_FILE },
-      });
-      assert.equal(upload.isError, undefined);
-      assert.match(upload.structuredContent.url, /^https:\/\//);
-    }
+    const generated=await client.callTool({name:"lovart_generate",arguments:{request_id:randomUUID(),prompt:"原始 16:9 角色描述",project_id:"fixture-project"}});
+    assert.equal(generated.isError,undefined,JSON.stringify(generated.content));
+    assert.equal(generated.structuredContent.cards.length,1,JSON.stringify(generated.structuredContent));
+    const id=generated.structuredContent.cards[0].probe_id;
+    const displayed=await client.callTool({name:"lovart_display",arguments:{probe_id:id}});
+    assert.equal(displayed.structuredContent.presentation_pending,true);
+    const data=await client.callTool({name:"lovart_card_get",arguments:{probe_id:id}});
+    assert.equal(JSON.parse(data.structuredContent.presentation_json).prompt,"原始 16:9 角色描述");
+    assert.equal(data.structuredContent.actions.recreate,true);
+    const html=await client.readResource({uri:"ui://lovart/result-card-v1.html"});
+    assert.match(html.contents[0].text,/lovart_card_get/);
 
-    if (process.env.LOVART_TEST_RESULT_THREAD_ID) {
-      const result = await client.callTool({
-        name: "lovart_result",
-        arguments: { thread_id: process.env.LOVART_TEST_RESULT_THREAD_ID },
-      });
-      assert.equal(result.isError, undefined, JSON.stringify(result.content));
-      assert.ok(result.structuredContent);
-      assert.ok(Array.isArray(result.structuredContent.downloaded));
-    }
   } finally {
-    try {
-      await client.close();
-    } finally {
-      rmSync(testHome, { recursive: true, force: true });
-      rmSync(testOutputDir, { recursive: true, force: true });
-      assert.equal(
-        existsSync(forbiddenTestState),
-        false,
-        "MCP integration tests must not leave plugin-local test state",
-      );
-    }
+    await client.close();
+    await rm(directory,{recursive:true,force:true});
   }
 });

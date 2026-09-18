@@ -84,6 +84,12 @@ test("extracted release starts MCP and lists tools without credentials", {
     const names = (await client.listTools()).tools.map(({ name }) => name);
     assert.ok(names.includes("lovart_generate"));
     assert.ok(names.includes("lovart_configure_credentials"));
+    const configured=await client.callTool({name:'lovart_configure_credentials',arguments:{}});
+    assert.equal(configured.isError,undefined);
+    assert.match(configured.structuredContent.url,/^http:\/\/127\.0\.0\.1:\d+\/setup#token=/);
+    const page=await fetch(configured.structuredContent.url);
+    assert.equal(page.status,200);
+    assert.match(await page.text(),/⌘V/);
   } finally {
     try {
       await client.close();

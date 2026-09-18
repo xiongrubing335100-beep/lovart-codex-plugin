@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const MIRRORED_PATHS = Object.freeze([
+  "README.md", "docs/images", "docs/install-windows.md", "docs/install-macos.md", "docs/development.md",
+  "package.json", "package-lock.json", ".mcp.json", "assets", "skills", "ui",
+  "dist/server.mjs", "dist/card.html", "scripts/start-mcp.mjs",
+  "scripts/configure-lovart-credentials.mjs", "scripts/save-lovart-credentials.ps1",
   "src",
   "vendor/lovart-skill",
   "scripts/configure-lovart-credentials.ps1",
@@ -34,7 +38,8 @@ export async function syncPluginBuild({ repositoryRoot, pluginRoot }) {
   }
   for (const { source, destination } of paths) {
     await rm(destination, { force: true, recursive: true });
-    await cp(source, destination, { recursive: true, force: true });
+    await cp(source, destination, { recursive: true, force: true,
+      filter:file=>!file.split(path.sep).includes('__pycache__')&&!/\.py[cod]$/.test(file) });
   }
 }
 

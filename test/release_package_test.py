@@ -50,6 +50,15 @@ def make_fixture_source(root: Path) -> Path:
         "package.json": '{"name":"fixture","version":"0.2.0"}\n',
         "package-lock.json": '{"lockfileVersion":3,"packages":{}}\n',
         "scripts/start-mcp.mjs": "console.log('fixture');\n",
+        "dist/server.mjs": "export {};\n",
+        "dist/card.html": "<html></html>\n",
+        "ui/credentials.html": "<form></form>\n",
+        "docs/images/example.png": b"fixture image\n",
+        "docs/install-windows.md": "fixture\n",
+        "docs/install-macos.md": "fixture\n",
+        "docs/development.md": "fixture\n",
+        "scripts/configure-lovart-credentials.mjs": "export {};\n",
+        "scripts/save-lovart-credentials.ps1": "exit 0\n",
         "scripts/verify-macos-credential-helper.mjs": "console.log('fixture');\n",
         "scripts/configure-lovart-credentials.ps1": (
             "Add-Type -AssemblyName System.Windows.Forms\n"

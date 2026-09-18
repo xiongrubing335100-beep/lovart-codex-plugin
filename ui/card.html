@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lovart · Image preview</title>
+<style>
+:root{color-scheme:dark;font-family:"Segoe UI",Arial,sans-serif;font-size:14px;--bg:#111111;--fg:#fff;--muted:#929292;--chip:#1b1b1b;--button:#2d2f2f}
+:root[data-theme=light]{color-scheme:light;--bg:#fff;--fg:#171717;--muted:#737373;--chip:#f3f3f3;--button:#ededed}
+*{box-sizing:border-box}html,body{margin:0;min-height:0;background:var(--bg);color:var(--fg)}
+#image-card{width:100%;min-height:160px;padding:17px 12.6667px 17px 16px;margin:0;background:var(--bg)}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid #d4ff00;outline-offset:3px}button:disabled{opacity:.45;cursor:default}
+.prompt-block{padding:0 8px}#prompt{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:20px;margin:0;min-height:20px}.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#expand{display:block;padding:0;border:0;background:none;color:var(--muted);font-size:14px;line-height:20px;margin-top:7px}#expand[hidden]{display:none}
+.meta{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0 12px;padding-left:4px;min-height:28px}.tags{display:flex;align-items:center;flex-wrap:wrap;min-width:0;gap:4px}.tag{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:0;border-radius:999px;font-size:11px;line-height:16px;white-space:nowrap;color:var(--muted);background:var(--chip)}.provider{font-size:12px;font-weight:700;color:var(--fg);line-height:14px}
+.references{display:flex;gap:9px;align-items:center}.reference{width:27px;height:27px;border-radius:8px;overflow:hidden;background-image:var(--reference-image);background-repeat:no-repeat;background-size:720px 642.6667px;flex:none}.reference:nth-child(1){background-position:-608px -148px}.reference:nth-child(2){background-position:-644px -148px}.reference:nth-child(3){background-position:-680px -148px}
+.visual{position:relative;margin:0;aspect-ratio:1033/577;border-radius:11px;overflow:hidden;background:#202a42}
+.image{position:absolute;display:block;width:104.54985%;max-width:none;height:auto;left:-2.710552%;top:-49.046794%;pointer-events:none}
+.footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:13px}.primary{display:inline-flex;align-items:center;gap:5px;background:var(--button);border:0;border-radius:8px;height:32px;padding:0 9px;font-size:12px;font-weight:600;line-height:16px;font-family:"Times New Roman",serif}.icon{width:18px;height:18px;flex:none}
+.brand-button[hidden]{display:none}.brand-button{width:32px;height:32px;display:grid;place-items:center;border:0;background:none;padding:0}.brand-icon{display:block;width:24px;height:24px;object-fit:contain}
+#diagnostics{border:1px solid #ffffff1a;border-radius:8px;margin-top:12px;padding:12px;font-size:12px;line-height:1.6;color:var(--muted)}#diagnostics[hidden],#notice[hidden]{display:none}.diagnostic-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}.secondary{background:var(--chip);border:0;border-radius:6px;padding:6px 10px;font-size:12px}#status,#nonce,#correlation{overflow-wrap:anywhere;margin:6px 0}#notice{font-size:12px;line-height:1.6;color:#dfaa75;margin:10px 0 0}
+@media(max-width:400px){#image-card{padding:14px 12px}.prompt-block{padding:0 4px}.references{gap:5px}.meta{gap:8px;padding-left:0}.tag{padding:4px 7px}}
+.media-actions{position:absolute;left:8px;bottom:7px;display:flex;gap:4px;opacity:0;pointer-events:none;transition:opacity .12s ease}
+.visual:hover .media-actions,.visual:focus-within .media-actions{opacity:1;pointer-events:auto}
+.media-action{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:0;border-radius:8px;background:#2d2f2f;color:white;font:600 12px "Segoe UI",Arial,sans-serif}
+.media-action svg{width:14px;height:14px;flex:none}.media-action.animate{background:#d4ff00;color:#0a0a0a}
+.media-action:hover{filter:brightness(1.1)}.media-action:focus-visible{outline-offset:-3px}
+@media(hover:none){.media-actions{opacity:1;pointer-events:auto}}
+@media(prefers-reduced-motion:reduce){.media-actions{transition:none}}.zoom-hit{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;z-index:1;pointer-events:auto;cursor:inherit}
+.media-actions{z-index:2}.media-action{cursor:pointer}.media-action:active,.primary:active{transform:translateY(1px);filter:brightness(.88)}
+[hidden]{display:none!important}
+#preview{height:100dvh;min-height:320px;background:#0f1112;padding:24px 32px;display:flex;flex-direction:column;position:relative}
+#close-preview{position:absolute;top:12px;right:16px;border:0;border-radius:8px;background:#292c2e;color:white;width:30px;height:30px;font-size:20px;z-index:2}
+.preview-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:32px 0}
+#preview .visual{width:min(84%,calc((100dvh - 180px)*1033/577));border-radius:0;flex:none}
+#preview .zoom-hit{display:none}
+.preview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:24px;width:80%;margin:0 auto}
+.preview-buttons{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+#preview .media-actions{position:static;opacity:1;pointer-events:auto;display:contents}
+#preview #animate{order:0}#preview #download{order:1}#preview #edit{order:2}#preview #bump{order:3;font-family:"Segoe UI",Arial,sans-serif}
+#preview .meta{margin:0;padding:0;gap:8px}#preview .references{gap:6px}
+#preview #notice{width:80%;margin:12px auto 0}
+@media(max-width:700px){#preview{padding:16px}.preview-toolbar{width:100%;flex-wrap:wrap;gap:12px}#preview .visual{width:min(100%,calc((100dvh - 220px)*1033/577))}#preview #notice{width:100%}}#image-card .visual{cursor:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cg%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%228%22%20stroke%3D%22white%22%20stroke-width%3D%225%22%2F%3E%3Cpath%20d%3D%22m18%2018%2010%2010%22%20stroke%3D%22white%22%20stroke-width%3D%227%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%228%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%2F%3E%3Cpath%20d%3D%22m18%2018%2010%2010%22%20stroke%3D%22black%22%20stroke-width%3D%223%22%2F%3E%3Cpath%20d%3D%22M8%2012h8m-4-4v8%22%20stroke%3D%22white%22%20stroke-width%3D%224%22%2F%3E%3Cpath%20d%3D%22M8%2012h8m-4-4v8%22%20stroke%3D%22black%22%20stroke-width%3D%221.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") 12 12,zoom-in}#image-card #open-preview{cursor:inherit}#image-card .media-actions button{cursor:pointer}.visual.actual-image .image{position:static;width:100%;height:100%;object-fit:contain;max-width:100%;left:auto;top:auto}
+.visual.actual-image{aspect-ratio:auto;background:transparent}
+.references .reference-asset{display:block;width:27px;height:27px;object-fit:cover;border-radius:8px}
+#preview .visual.actual-image{height:auto;max-height:calc(100dvh - 180px)}
+#preview .visual.actual-image .image{max-height:calc(100dvh - 180px);height:auto;object-fit:contain}
+#metadata-details{white-space:pre-wrap;overflow-wrap:anywhere}
+.reference-button{display:block;padding:0;border:0;border-radius:8px;background:none;cursor:zoom-in}
+#reference-dialog{box-sizing:border-box;width:calc(100% - 24px);max-width:1100px;height:calc(100dvh - 24px);max-height:960px;padding:16px;border:1px solid #555;border-radius:12px;background:var(--bg);color:var(--fg);overflow:hidden}
+#reference-dialog::backdrop{background:#000b}
+.reference-head{display:flex;align-items:center;justify-content:space-between;gap:12px;height:48px}
+#reference-caption{font-size:14px;overflow-wrap:anywhere;margin:0}
+.reference-stage{display:flex;align-items:center;justify-content:center;gap:12px;height:calc(100% - 72px)}
+#reference-full{display:block;min-width:0;max-width:calc(100% - 96px);max-height:100%;object-fit:contain;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
+#reference-full::selection{background:transparent}
+.reference-button,.reference-asset{user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
+.reference-nav,#reference-close{flex-shrink:0;border:0;border-radius:8px;background:var(--chip);padding:10px 12px;color:var(--fg)}
+#reference-error{font-size:12px;color:#dfaa75;margin:0}
+.visual.actual-video{cursor:default!important;background:#000}
+#video-media{display:block;width:100%;max-height:75dvh;object-fit:contain;background:#000}
+.actual-video .media-actions{display:none}
+.video-footer{justify-content:flex-start;gap:8px}
+.video-footer .brand-button[hidden]{display:none}.brand-button{margin-left:auto}
+#video-controls{position:relative;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#191919;color:#aaa;user-select:none}
+#video-controls[hidden]{display:none}
+#video-controls button{display:grid;place-items:center;flex-shrink:0;border:0;border-radius:6px;width:34px;height:36px;padding:7px;background:transparent;color:inherit;cursor:pointer}
+#video-controls button:hover{background:#303030;color:#fff}
+#video-controls button:focus-visible,#video-seek:focus-visible{outline:2px solid #ddd;outline-offset:2px}
+#video-controls svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#video-seek{flex:1;min-width:40px;height:24px;margin:0;appearance:none;background:transparent;cursor:pointer}
+#video-seek::-webkit-slider-runnable-track{height:3px;background:linear-gradient(to right,#aaa var(--played,0%),#333 var(--played,0%));border-radius:2px}
+#video-seek::-webkit-slider-thumb{appearance:none;width:20px;height:20px;border-radius:50%;background:#292929;border:1px solid #444;margin-top:-8.5px}
+#video-time{font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+#video-menu{position:absolute;bottom:calc(100% + 8px);right:44px;z-index:5;width:174px;padding:8px;background:#262626;border:1px solid #444;border-radius:10px;box-shadow:0 6px 24px #0008}
+#video-menu[hidden]{display:none}
+#video-menu .menu-title{font-size:12px;color:#aaa;padding:6px 10px}
+#video-menu button{display:flex;justify-content:space-between;width:100%;font-size:14px;padding:8px 10px}
+#video-menu button[aria-checked="true"]::after{content:'✓'}
+.visual.actual-video:fullscreen{display:flex;flex-direction:column;justify-content:center;width:100%;height:100%;margin:0;border-radius:0;background:#000}
+.actual-video:fullscreen #video-media{flex:1;min-height:0;max-height:calc(100dvh - 60px)}
+.actual-video:fullscreen .media-actions{display:none}
+@media(max-width:480px){#video-controls{gap:3px;padding:8px}#video-time{font-size:11px}#video-controls button{width:29px}}
+</style></head><body><main class="card" id="image-card" data-ui-version="cursor-v2">
+<div class="prompt-block"><div id="prompt" class="clamp">Loading…</div><button id="expand" type="button" aria-expanded="false" hidden>Show more</button></div>
+<div class="meta"><div class="tags"><span class="tag" id="model-label" title="Reference fixture model label; no model is invoked"><span class="provider" aria-hidden="true">G</span>Nano Banana Pro</span><span class="tag" id="aspect-label">16:9</span><span class="tag" id="resolution-label" hidden></span><span class="tag" id="resolution-spec" hidden></span><span class="tag" id="duration-label" hidden></span></div><div class="references" aria-label="Reference image thumbnails"><span class="reference" role="img" aria-label="Reference 1"></span><span class="reference" role="img" aria-label="Reference 2"></span><span class="reference" role="img" aria-label="Reference 3"></span></div></div>
+<figure class="visual"><img id="media" class="image" alt="Neutral UI test placeholder; no generated result" src="/* REFERENCE_IMAGE */"><video id="video-media" playsinline disablepictureinpicture preload="metadata" hidden></video><div id="video-controls" hidden role="group" aria-label="视频播放控制"><button id="video-play" type="button" aria-label="播放" title="播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 4 12 8-12 8Z"/></svg></button><input id="video-seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="视频进度"><span id="video-time">0:00 / 0:00</span><button id="video-mute" type="button" aria-label="静音" title="静音"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4Z M15 8q4 4 0 8 M18 5q7 7 0 14"/></svg></button><button id="video-speed" type="button" aria-label="播放设置" aria-expanded="false" aria-controls="video-menu" aria-haspopup="menu" title="播放设置"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="4" cy="12" r=".8"/><circle cx="12" cy="12" r=".8"/><circle cx="20" cy="12" r=".8"/></svg></button><div id="video-menu" role="menu" aria-label="播放速度" hidden><div class="menu-title">播放速度</div><button type="button" role="menuitemradio" aria-checked="false" data-speed="0.5">0.5×</button><button type="button" role="menuitemradio" aria-checked="false" data-speed="0.75">0.75×</button><button type="button" role="menuitemradio" aria-checked="true" data-speed="1">正常</button><button type="button" role="menuitemradio" aria-checked="false" data-speed="1.25">1.25×</button><button type="button" role="menuitemradio" aria-checked="false" data-speed="1.5">1.5×</button><button type="button" role="menuitemradio" aria-checked="false" data-speed="2">2×</button></div><button id="video-fullscreen" type="button" aria-label="全屏" title="全屏"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6 M20 4l-7 7 M10 20H4v-6 M4 20l7-7"/></svg></button></div><button id="open-preview" class="zoom-hit" type="button" aria-label="Open image preview"></button><div class="media-actions" role="group" aria-label="Image actions">
+<button id="animate" class="media-action animate" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="12" height="14" rx="2"/><path d="m15 9 6-3v12l-6-3z"/></svg>Animate</button>
+<button id="edit" class="media-action" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 12-12 3 3L7 20H4v-3Zm8-8 3 3M5 3v4M3 5h4M19 15v4M17 17h4"/></svg>Edit</button>
+<button id="download" class="media-action" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M3 15v6h18v-6"/></svg>Download</button>
+</div></figure>
+<div class="footer"><button id="bump" class="primary" title="P0: send a diagnostic message to Codex; no image generation" disabled><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 2 4 4-4 4M14 6H9a7 7 0 0 0-5 12M14 22l-4-4 4-4M10 18h5a7 7 0 0 0 5-12"/></svg>Recreate</button><button id="diagnostics-toggle" class="brand-button" aria-label="Open diagnostic details" aria-expanded="false" aria-controls="diagnostics" title="Lovart UI Probe · diagnostic details"><img class="brand-icon" src="/* LOVART_LOGO */" alt="Lovart"></button></div>
+<div id="build-label" hidden style="font-size:11px;color:#929292;margin-top:8px">UI 20260918-r21</div><p id="notice" role="status" aria-live="polite" hidden></p>
+<button id="retry-video" type="button" class="secondary" hidden>重试加载视频</button><button id="retry-load" type="button" class="secondary" hidden>重新加载卡片</button><section id="diagnostics" hidden><div class="diagnostic-heading"><strong>Lovart UI Probe · 静态 UI 对照</strong><button id="refresh" class="secondary" disabled>读取保存状态</button></div><div id="source-description">素材和模型标签来自用户提供的参考截图；Recreate 测试计数回调并向 Codex 发送诊断消息，不生成图片。</div><div id="metadata-details"></div><div id="connection-text" role="status">连接中</div><div id="count">服务端计数：—</div><div id="nonce">nonce: —</div><p id="status">等待 MCP Apps bridge…</p><div id="correlation"></div></section>
+</main><section id="preview" aria-label="Image preview" hidden><button id="close-preview" type="button" aria-label="Close image preview">×</button><div class="preview-stage"></div><div class="preview-toolbar"><div class="preview-buttons"></div><div class="preview-metadata"></div></div></section><dialog id="reference-dialog" aria-labelledby="reference-caption"><div class="reference-head"><h2 id="reference-caption" aria-live="polite"></h2><button id="reference-close" type="button" aria-label="关闭参考图">×</button></div><div class="reference-stage"><button id="reference-prev" class="reference-nav" type="button" aria-label="上一张参考图">‹</button><img id="reference-full" alt="" draggable="false"><button id="reference-next" class="reference-nav" type="button" aria-label="下一张参考图">›</button></div><p id="reference-error" hidden>参考图加载失败，请关闭后重试。</p></dialog><script>/* BUNDLE */</script></body></html>

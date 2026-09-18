@@ -32,10 +32,13 @@ COMMON_RUNTIME = (
     "package.json", "package-lock.json", "scripts/start-mcp.mjs",
     "scripts/verify-macos-credential-helper.mjs",
     "skills", "src", "vendor/lovart-skill",
+    "dist/server.mjs", "dist/card.html", "ui/credentials.html", "docs/images",
+    "docs/install-windows.md", "docs/install-macos.md", "docs/development.md",
+    "scripts/configure-lovart-credentials.mjs",
 )
 PLATFORM_RUNTIME = {
     "macos": ("bin/macos",),
-    "windows": ("scripts/configure-lovart-credentials.ps1",),
+    "windows": ("scripts/configure-lovart-credentials.ps1", "scripts/save-lovart-credentials.ps1"),
 }
 SECRET_PATTERNS = (
     re.compile(r"(?<![A-Za-z0-9_-])(?:ak|sk)_[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])", re.ASCII),

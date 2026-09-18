@@ -14,6 +14,7 @@ function trackedFiles(root, relative) {
   if (!statSync(source).isDirectory()) return [relative];
   return readdirSync(source, { recursive: true })
     .map((entry) => path.join(relative, entry))
+    .filter((entry) => !entry.split(path.sep).includes('__pycache__')&&!/\.py[cod]$/.test(entry))
     .filter((entry) => statSync(path.join(root, entry)).isFile())
     .sort();
 }
@@ -79,7 +80,7 @@ test("sync removes stale files from existing mirrored directories", async () => 
   }
 });
 
-test("sync rejects symlinked canonical inputs", async () => {
+test("sync rejects symlinked canonical inputs", {skip:process.platform==='win32'?'Symlink permissions are verified on macOS CI':false}, async () => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), "lovart-plugin-source-"));
   const output = mkdtempSync(path.join(tmpdir(), "lovart-plugin-output-"));
 

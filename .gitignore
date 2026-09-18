@@ -12,3 +12,8 @@ __pycache__/
 .worktrees/
 macos-helper/.build/
 dist/release/
+.release-inputs/
+test-results/
+evidence/
+*.sqlite*
+dist/extracted/
