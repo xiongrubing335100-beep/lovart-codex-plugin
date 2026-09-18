@@ -81,6 +81,8 @@ test('browser harness: actual bridge calls reach stdio, text is safe, remount re
     assert.ok((await frame.locator('#prompt').textContent()).startsWith('<script>'));
     assert.equal(await frame.locator('body').evaluate(()=>window.INJECTED), undefined);
     assert.equal(await frame.locator('#media').evaluate(img=>img.naturalWidth),1080);
+    // Size notifications are asynchronous and can arrive after the first render.
+    await page.waitForFunction(()=>Array.isArray(window.cardSizes)&&window.cardSizes.length>0);
     // Native previews temporarily hide the conversation. Never persist a zero-size card.
     await page.evaluate(async()=>{
       const frame=document.querySelector('iframe');frame.style.display='none';
